@@ -157,6 +157,7 @@ DOCKER_EXEC="docker run -t --rm --name $DOCKER_INST_NAME $DOCKER_INTERACTIVE --i
 DOCKER_EXEC+="--hostname $DOCKER_INST_NAME "
 DOCKER_EXEC+="-e SHELL=/bin/bash "
 DOCKER_EXEC+="-v $SCRIPTPATH:/workspace/finn "
+DOCKER_EXEC+="-v /home/mirza/Documents/Thesis/git_repos/forks/finn-base:/workspace/finn-base "
 DOCKER_EXEC+="-v $FINN_HOST_BUILD_DIR:$FINN_HOST_BUILD_DIR "
 DOCKER_EXEC+="-v $FINN_SSH_KEY_DIR:/home/$DOCKER_UNAME/.ssh "
 DOCKER_EXEC+="-e FINN_INST_NAME=$DOCKER_INST_NAME "

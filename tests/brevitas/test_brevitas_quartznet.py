@@ -71,3 +71,4 @@ def test_brevitas_quartznet_onnx_export_and_exec():
     # do forward pass in PyTorch/Brevitas
     expected = quartznet_torch.forward(rand_inp_torch).detach().numpy()
     assert np.isclose(produced, expected, atol=1e-3).all()
+    model.save("/tmp/quartznet.onnx")
