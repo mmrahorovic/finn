@@ -65,8 +65,17 @@ class InferConvInpGen(Transformation):
                     continue
                 i2c_inst = getCustomOp(n)
                 stride = i2c_inst.get_nodeattr("stride")
-                k = i2c_inst.get_nodeattr("kernel_size")
-                pad = i2c_inst.get_nodeattr("pad_amount")
+                k_attr = i2c_inst.get_nodeattr("kernel_size")
+                k_h = k_attr[0]
+                k_w = k_attr[1]
+                pad_attr = i2c_inst.get_nodeattr("pad_amount")
+                pad_h = pad_attr[0] + pad_attr[2]
+                pad_w = pad_attr[1] + pad_attr[3]
+                # temporary checks until non-square conv support is finalized
+                assert pad_h == pad_w, "Non-square images not yet supported."
+                assert k_h == k_w, "Non-square kernels not yet supported."
+                k = k_h
+                pad = pad_attr[0]
                 pad_val = i2c_inst.get_nodeattr("pad_value")
                 depthwise = i2c_inst.get_nodeattr("depthwise")
                 ifm_ch = i2c_in_shape[-1]
@@ -221,11 +230,13 @@ class InferPool_Batch(Transformation):
                 if n.op_type == "MaxPool":
                     k = get_by_name(n.attribute, "kernel_shape").ints[-1]
                     stride = get_by_name(n.attribute, "strides").ints[-1]
+                    # assumed datalayout
+                    dlayout = "NCHW"
                 elif n.op_type == "QuantAvgPool2d":
                     inst = getCustomOp(n)
                     k = inst.get_nodeattr("kernel")
                     stride = inst.get_nodeattr("stride")
-
+                    dlayout = inst.get_nodeattr("data_layout")
                 try:
                     pad = get_by_name(n.attribute, "pads").ints[-1]
                 except AttributeError:
@@ -250,19 +261,35 @@ class InferPool_Batch(Transformation):
 
                 odt = model.get_tensor_datatype(node_output)
 
-                ifm_ch = model.get_tensor_shape(n.input[0])[1]  # assume NCHW
+                if dlayout == "NCHW":
+                    ifm_ch = model.get_tensor_shape(n.input[0])[1]
+                else:
+                    ifm_ch = model.get_tensor_shape(n.input[0])[-1]
                 ofm_ch = ifm_ch
-                ifm_dim = model.get_tensor_shape(n.input[0])[-1]  # assume NCHW
-                ofm_dim = model.get_tensor_shape(n.output[0])[-1]  # assume NCHW
-                # create new intermediate values
-                inp_trans_out = helper.make_tensor_value_info(
-                    model.make_new_valueinfo_name(),
-                    TensorProto.FLOAT,
-                    (1, ifm_dim, ifm_dim, ifm_ch),  # NHWC
-                )
-                graph.value_info.append(inp_trans_out)
-                inp_trans_out = inp_trans_out.name
-                model.set_tensor_datatype(inp_trans_out, idt)
+                ifm_dim = model.get_tensor_shape(n.input[0])[-2]
+                ofm_dim = model.get_tensor_shape(n.output[0])[-2]
+
+                # if data layout NCHW, we need transpose nodes surrounding
+                # the hls layer
+                if dlayout == "NCHW":
+                    # create new intermediate values
+                    inp_trans_out = helper.make_tensor_value_info(
+                        model.make_new_valueinfo_name(),
+                        TensorProto.FLOAT,
+                        (1, ifm_dim, ifm_dim, ifm_ch),  # NHWC
+                    )
+                    graph.value_info.append(inp_trans_out)
+                    inp_trans_out = inp_trans_out.name
+                    model.set_tensor_datatype(inp_trans_out, idt)
+
+                    pool_output = helper.make_tensor_value_info(
+                        model.make_new_valueinfo_name(),
+                        TensorProto.FLOAT,
+                        (1, ofm_dim, ofm_dim, ofm_ch),
+                    )
+                    graph.value_info.append(pool_output)
+                    pool_output = pool_output.name
+                    # model.set_tensor_datatype(pool_output, odt)
 
                 im2col_out = helper.make_tensor_value_info(
                     model.make_new_valueinfo_name(),
@@ -273,20 +300,16 @@ class InferPool_Batch(Transformation):
                 im2col_out = im2col_out.name
                 model.set_tensor_datatype(im2col_out, idt)
 
-                pool_output = helper.make_tensor_value_info(
-                    model.make_new_valueinfo_name(),
-                    TensorProto.FLOAT,
-                    (1, ofm_dim, ofm_dim, ofm_ch),
-                )
-                graph.value_info.append(pool_output)
-                pool_output = pool_output.name
-                # model.set_tensor_datatype(pool_output, odt)
-
                 # create new nodes
-                # NCHW -> NHWC
-                inp_trans_node = helper.make_node(
-                    "Transpose", [node_input], [inp_trans_out], perm=[0, 2, 3, 1]
-                )
+                if dlayout == "NCHW":
+                    # NCHW -> NHWC
+                    inp_trans_node = helper.make_node(
+                        "Transpose", [node_input], [inp_trans_out], perm=[0, 2, 3, 1]
+                    )
+                    im2col_in = inp_trans_out
+                else:
+                    im2col_in = node_input
+                    pool_output = node_output
 
                 accum_bits = 0
                 pool_size_param = k
@@ -312,12 +335,12 @@ class InferPool_Batch(Transformation):
                 # format input tensor
                 im2col_node = helper.make_node(
                     "Im2Col",
-                    [inp_trans_out],
+                    [im2col_in],
                     [im2col_out],
                     domain="finn.custom_op.general",
                     stride=stride,
-                    kernel_size=k,
-                    pad_amount=pad,
+                    kernel_size=[k, k],
+                    pad_amount=[pad, pad, pad, pad],
                     pad_value=pad_value,
                     depthwise=1,
                     input_shape="(1,{},{},{})".format(ifm_dim, ifm_dim, ifm_ch),
@@ -345,16 +368,21 @@ class InferPool_Batch(Transformation):
                     BatchSize=1,
                 )
 
-                # NHWC -> NCHW
-                out_trans_node = helper.make_node(
-                    "Transpose", [pool_output], [node_output], perm=[0, 3, 1, 2]
-                )
+                if dlayout == "NCHW":
+                    # NHWC -> NCHW
+                    out_trans_node = helper.make_node(
+                        "Transpose", [pool_output], [node_output], perm=[0, 3, 1, 2]
+                    )
 
                 # insert nodes where the conv is to preserve topological ordering
-                graph.node.insert(node_ind, inp_trans_node)
-                graph.node.insert(node_ind + 1, im2col_node)
-                graph.node.insert(node_ind + 2, pool_node)
-                graph.node.insert(node_ind + 3, out_trans_node)
+                if dlayout == "NCHW":
+                    graph.node.insert(node_ind, inp_trans_node)
+                    graph.node.insert(node_ind + 1, im2col_node)
+                    graph.node.insert(node_ind + 2, pool_node)
+                    graph.node.insert(node_ind + 3, out_trans_node)
+                else:
+                    graph.node.insert(node_ind, im2col_node)
+                    graph.node.insert(node_ind + 1, pool_node)
                 # remove old node
                 graph.node.remove(n)
                 graph_modified = True
@@ -538,7 +566,7 @@ class InferQuantizedStreamingFCLayer(Transformation):
                     wmem = mw * mh // (pe * simd)
                     assert (
                         mw * mh == wmem * pe * simd
-                    ), """Requirement (MW * MH) divisiable by
+                    ), """Requirement (MW * MH) divisible by
                     (WMEM * PE * SIMD) is violated."""
                     # see if we have any following thresholds
                     consumer = model.find_consumer(mm_output)
@@ -555,19 +583,27 @@ class InferQuantizedStreamingFCLayer(Transformation):
                         thresholds neither 1 nor MH."""
                         odt = model.get_tensor_datatype(mt_output)
                         scale = getCustomOp(consumer).get_nodeattr("out_scale")
-                        assert (
-                            scale == 1.0
-                        ), "out_scale must be equal to 1.0 for HLS conversion."
                         actval = getCustomOp(consumer).get_nodeattr("out_bias")
                         assert (
                             int(actval) == actval
                         ), "out_bias must be integer for HLS conversion."
                         actval = int(actval)
+                        odt_is_bipolar = odt == DataType.BIPOLAR
+                        bipolar_ok = (
+                            odt_is_bipolar and (scale == 2.0) and (actval == -1)
+                        )
+                        assert (
+                            scale == 1.0 or bipolar_ok
+                        ), "out_scale = 1.0 or bipolar output needed for conversion."
                         assert (not odt.signed()) or (
                             actval < 0
                         ), "Signed output requres actval < 0"
                         model.set_tensor_shape(mm_input, mm_in_shape)
                         model.set_tensor_shape(mt_output, mt_out_shape)
+                        if bipolar_ok:
+                            # remove bias for bipolar, since
+                            # binary->bipolar is achieved by reinterpretation
+                            actval = 0
                         # create and insert new StreamingFCLayer node
                         new_node = helper.make_node(
                             "StreamingFCLayer_Batch",
@@ -768,6 +804,7 @@ class InferVVAU(Transformation):
                         graph.node.remove(n)
                         graph_modified = True
         if graph_modified:
+            model = model.transform(MinimizeAccumulatorWidth())
             model = model.transform(InferShapes())
             model = model.transform(InferDataTypes())
         return (model, graph_modified)
@@ -1204,6 +1241,7 @@ class InferLabelSelectLayer(Transformation):
                     continue
 
                 num_labels = int(fc_in_shape[-1])
+                num_inp_vecs = list(fc_in_shape[:-1])
                 # create node with no parallelization first
                 pe = 1
                 assert (
@@ -1223,6 +1261,7 @@ class InferLabelSelectLayer(Transformation):
                     PE=pe,
                     K=k,
                     inputDataType=idt.name,
+                    numInputVectors=num_inp_vecs,
                 )
                 graph.node.insert(node_ind, new_node)
                 # remove old node
