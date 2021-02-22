@@ -31,21 +31,35 @@
 # ./run-docker.sh build_custom /path/to/folder
 
 
-import finn.util.build_dataflow as build
+import finn.builder.build_dataflow as build
+import finn.builder.build_dataflow_config as build_cfg
 
 model_name = "tfc_w1a1"
 platform_name = "Pynq-Z1"
 
 cfg = build.DataflowBuildConfig(
     output_dir="output_%s_%s" % (model_name, platform_name),
-    folding_config_file="folding_config.json",
+    target_fps=100000,
+    mvau_wwidth_max=10000,
+    # can specify detailed folding/FIFO/etc config with:
+    # folding_config_file="folding_config.json",
     synth_clk_period_ns=10.0,
     board=platform_name,
-    shell_flow_type=build.ShellFlowType.VIVADO_ZYNQ,
+    shell_flow_type=build_cfg.ShellFlowType.VIVADO_ZYNQ,
     generate_outputs=[
-        build.DataflowOutputType.PYNQ_DRIVER,
-        build.DataflowOutputType.STITCHED_IP,
-        build.DataflowOutputType.BITFILE,
+        build_cfg.DataflowOutputType.PYNQ_DRIVER,
+        build_cfg.DataflowOutputType.STITCHED_IP,
+        build_cfg.DataflowOutputType.RTLSIM_PERFORMANCE,
+        build_cfg.DataflowOutputType.ESTIMATE_REPORTS,
+        build_cfg.DataflowOutputType.OOC_SYNTH,
+        build_cfg.DataflowOutputType.BITFILE,
+        build_cfg.DataflowOutputType.DEPLOYMENT_PACKAGE,
+    ],
+    verify_steps=[
+        build_cfg.VerificationStepType.TIDY_UP_PYTHON,
+        build_cfg.VerificationStepType.STREAMLINED_PYTHON,
+        build_cfg.VerificationStepType.FOLDED_HLS_CPPSIM,
+        build_cfg.VerificationStepType.STITCHED_IP_RTLSIM,
     ],
     save_intermediate_models=True,
 )
