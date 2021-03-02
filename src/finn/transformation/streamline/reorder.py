@@ -1072,6 +1072,7 @@ class MoveTransposePastMultiThreshold(Transformation):
                             # will be in NHWC format
                             new_data_layout = "NHWC"
                             new_tensor_data_layout = DataLayout.NHWC
+                            graph_modified = True
                         else:
                             continue
 
@@ -1082,6 +1083,7 @@ class MoveTransposePastMultiThreshold(Transformation):
                             # will be in NCHW format
                             new_data_layout = "NCHW"
                             new_tensor_data_layout = DataLayout.NCHW
+                            graph_modified = True
                         else:
                             continue
 
@@ -1108,6 +1110,7 @@ class MoveTransposePastMultiThreshold(Transformation):
                     n.output[0] = multithreshold_out
 
         # We must ensure the graph is sorted, because we reordered the nodes
-        model = model.transform(SortGraph())
+        if graph_modified:
+            model = model.transform(SortGraph(), make_deepcopy=False, cleanup=False)
 
         return (model, graph_modified)

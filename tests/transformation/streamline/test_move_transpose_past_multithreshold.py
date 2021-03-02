@@ -10,111 +10,130 @@ from finn.transformation.streamline.reorder import MoveTransposePastMultiThresho
 from finn.util.basic import gen_finn_dt_tensor
 import finn.core.onnx_exec as oxe
 
+
 def create_model(permutation, default_data_layout):
     if permutation == [0, 3, 1, 2]:
         in_shape = [1, 128, 1, 256]
         out_shape = [1, 256, 128, 1]
-        data_layout = 'NCHW'
+        data_layout = "NCHW"
     if permutation == [0, 2, 3, 1]:
         in_shape = [1, 256, 128, 1]
         out_shape = [1, 128, 1, 256]
-        data_layout = 'NHWC'
+        data_layout = "NHWC"
 
     Transpose1_node = oh.make_node(
         "Transpose",
-        inputs = ['in_transpose1'],
-        outputs = ['out_transpose1'],
-        perm = permutation
+        inputs=["in_transpose1"],
+        outputs=["out_transpose1"],
+        perm=permutation,
     )
 
     Transpose2_node = oh.make_node(
         "Transpose",
-        inputs = ['in_transpose2'],
-        outputs = ['out_transpose2'],
-        perm = permutation
+        inputs=["in_transpose2"],
+        outputs=["out_transpose2"],
+        perm=permutation,
     )
 
-    if default_data_layout is True and data_layout == 'NCHW': # meaning that we will not set the data_layout attribute
+    if (
+        default_data_layout is True and data_layout == "NCHW"
+    ):  # meaning that we will not set the data_layout attribute
         Multithreshold1_node = oh.make_node(
             "MultiThreshold",
-            inputs = ['out_transpose1', 'in2_multithreshold1'],
-            outputs = ['out_multithreshold1'],
-            domain = 'finn.custom_op.general',
-            out_dtype = 'UINT4'
+            inputs=["out_transpose1", "in2_multithreshold1"],
+            outputs=["out_multithreshold1"],
+            domain="finn.custom_op.general",
+            out_dtype="UINT4",
         )
 
         Multithreshold2_node = oh.make_node(
             "MultiThreshold",
-            inputs = ['out_transpose2', 'in2_multithreshold2'],
-            outputs = ['out_multithreshold2'],
-            domain = 'finn.custom_op.general',
-            out_dtype = 'UINT4'
+            inputs=["out_transpose2", "in2_multithreshold2"],
+            outputs=["out_multithreshold2"],
+            domain="finn.custom_op.general",
+            out_dtype="UINT4",
         )
-    else: # we set the data_layout attribute
+    else:  # we set the data_layout attribute
         Multithreshold1_node = oh.make_node(
             "MultiThreshold",
-            inputs = ['out_transpose1', 'in2_multithreshold1'],
-            outputs = ['out_multithreshold1'],
-            domain = 'finn.custom_op.general',
-            out_dtype = 'UINT4',
-            data_layout = data_layout
+            inputs=["out_transpose1", "in2_multithreshold1"],
+            outputs=["out_multithreshold1"],
+            domain="finn.custom_op.general",
+            out_dtype="UINT4",
+            data_layout=data_layout,
         )
 
         Multithreshold2_node = oh.make_node(
             "MultiThreshold",
-            inputs = ['out_transpose2', 'in2_multithreshold2'],
-            outputs = ['out_multithreshold2'],
-            domain = 'finn.custom_op.general',
-            out_dtype = 'UINT4',
-            data_layout = data_layout
+            inputs=["out_transpose2", "in2_multithreshold2"],
+            outputs=["out_multithreshold2"],
+            domain="finn.custom_op.general",
+            out_dtype="UINT4",
+            data_layout=data_layout,
         )
 
     Add1_node = oh.make_node(
         "Add",
-        inputs = ['out_multithreshold1', 'out_multithreshold2'],
-        outputs = ['out_add1']
+        inputs=["out_multithreshold1", "out_multithreshold2"],
+        outputs=["out_add1"],
     )
 
-    in_transpose1 = oh.make_tensor_value_info('in_transpose1', TensorProto.FLOAT, in_shape)
-    in_transpose2 = oh.make_tensor_value_info('in_transpose2', TensorProto.FLOAT, in_shape)
-    out_add1 = oh.make_tensor_value_info('out_add1', TensorProto.FLOAT, out_shape)
+    in_transpose1 = oh.make_tensor_value_info(
+        "in_transpose1", TensorProto.FLOAT, in_shape
+    )
+    in_transpose2 = oh.make_tensor_value_info(
+        "in_transpose2", TensorProto.FLOAT, in_shape
+    )
+    out_add1 = oh.make_tensor_value_info("out_add1", TensorProto.FLOAT, out_shape)
 
-    out_transpose1 = oh.make_tensor_value_info('out_transpose1', TensorProto.FLOAT, out_shape)
-    out_transpose2 = oh.make_tensor_value_info('out_transpose2', TensorProto.FLOAT, out_shape)
-    out_multithreshold1 = oh.make_tensor_value_info('out_multithreshold1', TensorProto.FLOAT, out_shape)
-    out_multithreshold2 = oh.make_tensor_value_info('out_multithreshold2', TensorProto.FLOAT, out_shape)
+    out_transpose1 = oh.make_tensor_value_info(
+        "out_transpose1", TensorProto.FLOAT, out_shape
+    )
+    out_transpose2 = oh.make_tensor_value_info(
+        "out_transpose2", TensorProto.FLOAT, out_shape
+    )
+    out_multithreshold1 = oh.make_tensor_value_info(
+        "out_multithreshold1", TensorProto.FLOAT, out_shape
+    )
+    out_multithreshold2 = oh.make_tensor_value_info(
+        "out_multithreshold2", TensorProto.FLOAT, out_shape
+    )
 
-    in2_multithreshold1 = oh.make_tensor_value_info('in2_multithreshold1', TensorProto.FLOAT, [256, 15])
-    in2_multithreshold2 = oh.make_tensor_value_info('in2_multithreshold2', TensorProto.FLOAT, [256, 15])
+    in2_multithreshold1 = oh.make_tensor_value_info(
+        "in2_multithreshold1", TensorProto.FLOAT, [256, 15]
+    )
+    in2_multithreshold2 = oh.make_tensor_value_info(
+        "in2_multithreshold2", TensorProto.FLOAT, [256, 15]
+    )
 
     graph = oh.make_graph(
-        nodes = [
+        nodes=[
             Transpose1_node,
             Transpose2_node,
             Multithreshold1_node,
             Multithreshold2_node,
-            Add1_node
+            Add1_node,
         ],
-        name = "test_graph",
-        inputs = [in_transpose1, in_transpose2],
-        outputs = [out_add1],
-        value_info = [
+        name="test_graph",
+        inputs=[in_transpose1, in_transpose2],
+        outputs=[out_add1],
+        value_info=[
             out_transpose1,
             out_transpose2,
             out_multithreshold1,
             out_multithreshold2,
             in2_multithreshold1,
-            in2_multithreshold2
-        ]
+            in2_multithreshold2,
+        ],
     )
 
     onnx_model = oh.make_model(graph, producer_name="test_model")
     model = ModelWrapper(onnx_model)
 
-    mt_weights = np.random.randint(low=-1000, high=1000, size=[256,15])
+    mt_weights = np.random.randint(low=-1000, high=1000, size=[256, 15])
     mt_weights = np.sort(mt_weights, 1)
-    model.set_initializer('in2_multithreshold1', mt_weights)
-    model.set_initializer('in2_multithreshold2', mt_weights)
+    model.set_initializer("in2_multithreshold1", mt_weights)
+    model.set_initializer("in2_multithreshold2", mt_weights)
 
     return model
 
@@ -145,8 +164,12 @@ def test_move_transpose_past_multithreshold(perm, default_data_layout):
     # Check if order changed
     node0_input0_model = model.find_consumer(model.graph.input[0].name).op_type
     node1_input1_model = model.find_consumer(model.graph.input[1].name).op_type
-    node0_input0_model_transformed = model_transformed.find_consumer(model_transformed.graph.input[0].name).op_type
-    node1_input1_model_transformed = model_transformed.find_consumer(model_transformed.graph.input[1].name).op_type
+    node0_input0_model_transformed = model_transformed.find_consumer(
+        model_transformed.graph.input[0].name
+    ).op_type
+    node1_input1_model_transformed = model_transformed.find_consumer(
+        model_transformed.graph.input[1].name
+    ).op_type
     assert node0_input0_model != node0_input0_model_transformed
     assert node1_input1_model != node1_input1_model_transformed
 
