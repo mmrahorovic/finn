@@ -15,8 +15,8 @@ gecho () {
 #FINN_BASE_COMMIT=4b62c98b4485a8d82f1ca2eb98255af33ce699b0
 BREVITAS_COMMIT=aff49758ec445d77c75721c7de3091a2a1797ca8
 CNPY_COMMIT=4e8810b1a8637695171ed346ce68f6984e585ef4
-HLSLIB_COMMIT=2e49322d1bbc4969ca293843bda1f3f9c05456fc
-PYVERILATOR_COMMIT=e2ff74030de3992dcac54bf1b6aad2915946e8cb
+#HLSLIB_COMMIT=2e49322d1bbc4969ca293843bda1f3f9c05456fc
+PYVERILATOR_COMMIT=e2ff74030de3992dcac54bf1b6aad2915945e8cb
 OMX_COMMIT=1bae737669901e762f581af73348332b5c4b2ada
 
 gecho "Setting up known-good commit versions for FINN dependencies"
@@ -35,9 +35,9 @@ gecho "cnpy @ $CNPY_COMMIT"
 git -C /workspace/cnpy pull --quiet
 git -C /workspace/cnpy checkout $CNPY_COMMIT --quiet
 # FINN hlslib
-gecho "finn-hlslib @ $HLSLIB_COMMIT"
-git -C /workspace/finn-hlslib pull --quiet
-git -C /workspace/finn-hlslib checkout $HLSLIB_COMMIT --quiet
+#gecho "finn-hlslib @ $HLSLIB_COMMIT"
+#git -C /workspace/finn-hlslib pull --quiet
+#git -C /workspace/finn-hlslib checkout $HLSLIB_COMMIT --quiet
 # PyVerilator
 gecho "PyVerilator @ $PYVERILATOR_COMMIT"
 git -C /workspace/pyverilator pull --quiet
