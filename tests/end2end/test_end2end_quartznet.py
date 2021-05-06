@@ -27,8 +27,12 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import time
+import os
+import pathlib
 import pytest
 import numpy as np
+import brevitas.onnx as bo
+import brevitas_examples.speech_to_text as stt
 
 from finn.custom_op.registry import getCustomOp
 from finn.util.test import (
@@ -39,6 +43,7 @@ from finn.core.datatype import DataType
 from finn.util.basic import get_by_name
 
 from finn.transformation.change_3d_tensors_to_4d import Change3DTo4DTensors
+from finn.transformation.infer_shapes import InferShapes
 from finn.transformation.general import (
     GiveUniqueNodeNames,
     GiveRandomTensorNames,
@@ -85,9 +90,26 @@ from finn.transformation.fpgadataflow.replace_verilog_relpaths import (
     ReplaceVerilogRelPaths,
 )
 from finn.transformation.fpgadataflow.annotate_resources import AnnotateResources
+from finn.util.basic import alveo_part_map, alveo_default_platform
 
 build_dir = os.environ["FINN_BUILD_DIR"]
 mem_mode = "decoupled"
+test_board = "U280"
+test_platform = alveo_default_platform[test_board]
+test_fpga_part = alveo_part_map[test_board]
+target_clk_ns = 10
+
+def test_end2end_quartznet_export():
+    preproc_onnx = build_dir+"/end2end_quartznet_preproc.onnx"
+    quartznet_torch = stt.quant_quartznet_perchannelscaling_4b(export_mode=True)
+    ishape = (1, 64, 256)
+    idt = DataType.FLOAT32
+    bo.export_finn_onnx(quartznet_torch, ishape, preproc_onnx)
+    model = ModelWrapper(preproc_onnx)
+    model = model.transform(InferShapes())
+    model = model.transform(FoldConstants())
+    model = model.transform(RemoveStaticGraphInputs())
+    model.save(build_dir+"/end2end_quartznet_export.onnx")
 
 def test_end2end_quartznet_tidy_and_change_shape_tensors():
     model = load_test_checkpoint_or_skip(build_dir+"/end2end_quartznet_export.onnx")
@@ -140,6 +162,11 @@ def test_end2end_quartznet_streamline():
     node_after_mul.input[0] = input_mul
     model.graph.node.remove(final_mul_node)
 
+    model = model.transform(GiveUniqueNodeNames())
+    model = model.transform(GiveRandomTensorNames())
+    model = model.transform(GiveReadableTensorNames())
+    model = model.transform(GiveUniqueParameterTensors())
+
     model.save(build_dir+"/end2end_quartznet_streamline.onnx")
 
 def test_end2end_quartznet_lowering():
@@ -151,14 +178,14 @@ def test_end2end_quartznet_lowering():
                     4: range(219, 291),
                     5: range(291, 363),
                     6: range(363, 375)}
-    model = model.transform(PartitionFromDict(partitionings))
+    model = model.transform(PartitionFromDict(partitionings, build_dir+"/partitioning_lowering"))
 
     for n in model.graph.node:
         path_to_partition = get_by_name(n.attribute, "model", "name").s.decode('utf-8')
         model_partition = ModelWrapper(path_to_partition)
         # Lowering
         model_partition = model_partition.transform(LowerConvsToMatMul())
-        # Absorb transpose nodes
+        # Absorb transpose node
         model_partition = model_partition.transform(AbsorbTransposeIntoMultiThreshold())
         # Reorder remaining transpose nodes
         model_partition = model_partition.transform(MoveTransposePastMultiThreshold())
@@ -190,29 +217,32 @@ def test_end2end_quartznet_repartition():
         model = model.transform(AbsorbTransposeIntoMultiThreshold())
 
         if ind==0:
-            model = model.transform(PartitionFromDict(partitionings[0], "/tmp/finn_dev_mirza/partitioning_final"))
+            model = model.transform(PartitionFromDict(partitionings[0], build_dir+"/partitioning_repartition"))
         if ind==1:
-            model = model.transform(PartitionFromDict(partitionings[1], "/tmp/finn_dev_mirza/partitioning_final"))
+            model = model.transform(PartitionFromDict(partitionings[1], build_dir+"/partitioning_repartition"))
         if ind==2:
-            model = model.transform(PartitionFromDict(partitionings[2], "/tmp/finn_dev_mirza/partitioning_final"))
+            model = model.transform(PartitionFromDict(partitionings[2], build_dir+"/partitioning_repartition"))
         if ind==3:
-            model = model.transform(PartitionFromDict(partitionings[3], "/tmp/finn_dev_mirza/partitioning_final"))
+            model = model.transform(PartitionFromDict(partitionings[3], build_dir+"/partitioning_repartition"))
         if ind==4:
-            model = model.transform(PartitionFromDict(partitionings[4], "/tmp/finn_dev_mirza/partitioning_final"))
+            model = model.transform(PartitionFromDict(partitionings[4], build_dir+"/partitioning_repartition"))
         if ind==5:
-            model = model.transform(PartitionFromDict(partitionings[5], "/tmp/finn_dev_mirza/partitioning_final"))
+            model = model.transform(PartitionFromDict(partitionings[5], build_dir+"/partitioning_repartition"))
             break
 
-    model.save(build+dir+"/end2end_quartznet_lowered_partitioned.onnx")
+    model.save(build_dir+"/end2end_quartznet_lowered_partitioned.onnx")
 
 def test_end2end_quartznet_convert_to_hls_layers():
     model = load_test_checkpoint_or_skip(build_dir+"/end2end_quartznet_lowered_partitioned.onnx")
-    model = model.transform(to_hls.InferConvInpGen(), make_deepcopy=False)
-    model = model.transform(to_hls.InferVVAU(), make_deepcopy=False)
-    model = model.transform(to_hls.InferQuantizedStreamingFCLayer(), make_deepcopy=False)
 
+    #partition_dir = build_dir+"/partitioning_hls"
+
+    partition_id = 0
     for n in model.graph.node:
         if n.op_type=="GenericPartition":
+            #inst = GetCustomOp(n)
+            prefix = "pt_"+str(partition_id)+"_"
+
             path_to_partition = get_by_name(n.attribute, "model", "name").s.decode('utf-8')
             model_partition = ModelWrapper(path_to_partition)
 
@@ -223,7 +253,14 @@ def test_end2end_quartznet_convert_to_hls_layers():
             model_partition = model_partition.transform(to_hls.InferAddStreamsLayer(), make_deepcopy=False)
             model_partition = model_partition.transform(to_hls.InferDuplicateStreamsLayer(), make_deepcopy=False)
 
+            model_partition = model_partition.transform(GiveUniqueNodeNames(prefix))
+
+            #pathlib.Path(self.partition_dir).mkdir(parents=True, exist_ok=True)
+            #partition_path = partition_dir+"/partition_"+str(partition_id)+".onnx"
             model_partition.save(path_to_partition)
+            #inst.set_nodeattr("model", partition_path)
+
+            partition_id+=1
 
     model.save(build_dir+"/end2end_quartznet_hls_layers.onnx")
 
@@ -250,8 +287,12 @@ def test_end2end_quartznet_folding():
                         assert(mh%4==0 and mw%4==0)
                         mh = int(mh/4)
                     mw = int(mw/4)
-                    inst.set_nodeattr("PE", mh) # mh % PE ==0
-                    inst.set_nodeattr("SIMD", mw) # mw % SIMD ==0
+                    if n.name == "pt_1_StreamingFCLayer_Batch_0":
+                        inst.set_nodeattr("PE", mw) # mh % PE ==0
+                        inst.set_nodeattr("SIMD", mw) # mw % SIMD ==0
+                    else:
+                        inst.set_nodeattr("PE", mh) # mh % PE ==0
+                        inst.set_nodeattr("SIMD", mw) # mw % SIMD ==0
                 if n.op_type=="Vector_Vector_Activate_Batch":
                     # Initial: PE = IFM_CH
                     inst = getCustomOp(n)
@@ -342,4 +383,12 @@ def test_end2end_quartznet_gen_hls_ip():
 
     model.save(build_dir+"/end2end_quartznet_ipgen.onnx")
 
-def test_end2end_quartznet_rtlsim():
+def test_all():
+    #test_end2end_quartznet_export()
+    test_end2end_quartznet_tidy_and_change_shape_tensors()
+    test_end2end_quartznet_streamline()
+    test_end2end_quartznet_lowering()
+    test_end2end_quartznet_repartition()
+    test_end2end_quartznet_convert_to_hls_layers()
+    test_end2end_quartznet_folding()
+    test_end2end_quartznet_gen_hls_ip()
