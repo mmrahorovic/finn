@@ -91,7 +91,8 @@ from finn.transformation.fpgadataflow.replace_verilog_relpaths import (
 from finn.transformation.fpgadataflow.annotate_resources import AnnotateResources
 from finn.util.basic import alveo_part_map, alveo_default_platform
 
-build_dir = os.environ["FINN_BUILD_DIR"]
+#build_dir = os.environ["FINN_BUILD_DIR"]
+build_dir = "/shares/bulk/mmrahorovic/data"
 mem_mode = "decoupled"
 test_board = "U280"
 test_platform = alveo_default_platform[test_board]
@@ -223,7 +224,6 @@ def test_end2end_quartznet_convert_to_hls_layers():
     model = load_test_checkpoint_or_skip(build_dir+"/end2end_quartznet_lowered_partitioned.onnx")
 
     #partition_dir = build_dir+"/partitioning_hls"
-
     partition_id = 0
     for n in model.graph.node:
         if n.op_type=="GenericPartition":
