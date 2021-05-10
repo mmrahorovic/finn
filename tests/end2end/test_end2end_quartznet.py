@@ -31,8 +31,6 @@ import os
 import pathlib
 import pytest
 import numpy as np
-import brevitas.onnx as bo
-import brevitas_examples.speech_to_text as stt
 
 from finn.custom_op.registry import getCustomOp
 from finn.util.test import (
@@ -43,7 +41,7 @@ from finn.core.datatype import DataType
 from finn.util.basic import get_by_name
 
 from finn.transformation.change_3d_tensors_to_4d import Change3DTo4DTensors
-from finn.transformation.infer_shapes import InferShapes
+#from finn.transformation.infer_shapes import InferShapes
 from finn.transformation.general import (
     GiveUniqueNodeNames,
     GiveRandomTensorNames,
@@ -67,7 +65,8 @@ from finn.transformation.streamline.absorb import(
     AbsorbAddIntoMultiThreshold,
     AbsorbMulIntoMultiThreshold,
     FactorOutMulSignMagnitude,
-    Absorb1BitMulIntoConv
+    Absorb1BitMulIntoConv,
+    AbsorbSignBiasIntoMultiThreshold
 )
 from finn.transformation.streamline.round_thresholds import RoundAndClipThresholds
 from finn.transformation.infer_datatypes import InferDataTypes
@@ -99,20 +98,9 @@ test_platform = alveo_default_platform[test_board]
 test_fpga_part = alveo_part_map[test_board]
 target_clk_ns = 10
 
-def test_end2end_quartznet_export():
-    preproc_onnx = build_dir+"/end2end_quartznet_preproc.onnx"
-    quartznet_torch = stt.quant_quartznet_perchannelscaling_4b(export_mode=True)
-    ishape = (1, 64, 256)
-    idt = DataType.FLOAT32
-    bo.export_finn_onnx(quartznet_torch, ishape, preproc_onnx)
-    model = ModelWrapper(preproc_onnx)
-    model = model.transform(InferShapes())
-    model = model.transform(FoldConstants())
-    model = model.transform(RemoveStaticGraphInputs())
-    model.save(build_dir+"/end2end_quartznet_export.onnx")
 
 def test_end2end_quartznet_tidy_and_change_shape_tensors():
-    model = load_test_checkpoint_or_skip(build_dir+"/end2end_quartznet_export.onnx")
+    model = load_test_checkpoint_or_skip(build_dir+"/end2end_quartznet_export_dev.onnx")
 
     model = model.transform(GiveUniqueNodeNames())
     model = model.transform(GiveRandomTensorNames())
@@ -126,12 +114,11 @@ def test_end2end_quartznet_tidy_and_change_shape_tensors():
 
 def test_end2end_quartznet_streamline():
     model = load_test_checkpoint_or_skip(build_dir+"/end2end_quartznet_tidy.onnx")
+
+    # Absorb sign bias from export into MultiThreshold node
+    model = model.transform(AbsorbSignBiasIntoMultiThreshold())
     # Collapse BatchNorm to Add and Mul
     model = model.transform(BatchNormToAffine())
-    # Group additions
-    model = model.transform(MoveAddPastMul())
-    model = model.transform(MoveAddPastConv())
-    model = model.transform(MoveAddPastMul())
     # Group multiplications
     model = model.transform(MoveMulPastFork())
     model = model.transform(MoveScalarMulPastConv())
@@ -156,11 +143,11 @@ def test_end2end_quartznet_streamline():
 
     # Remove floating point scalar multiplication before argmax
     mul_nodes = [x for x in model.graph.node if (x.op_type=="Mul")]
-    final_mul_node = mul_nodes[-1]
-    input_mul = final_mul_node.input[0]
-    node_after_mul = model.find_consumer(final_mul_node.output[0])
-    node_after_mul.input[0] = input_mul
-    model.graph.node.remove(final_mul_node)
+    for n_mul in mul_nodes:
+        input_mul = n_mul.input[0]
+        node_after_mul = model.find_consumer(n_mul.output[0])
+        node_after_mul.input[0] = input_mul
+        model.graph.node.remove(n_mul)
 
     model = model.transform(GiveUniqueNodeNames())
     model = model.transform(GiveRandomTensorNames())
@@ -384,7 +371,6 @@ def test_end2end_quartznet_gen_hls_ip():
     model.save(build_dir+"/end2end_quartznet_ipgen.onnx")
 
 def test_all():
-    #test_end2end_quartznet_export()
     test_end2end_quartznet_tidy_and_change_shape_tensors()
     test_end2end_quartznet_streamline()
     test_end2end_quartznet_lowering()

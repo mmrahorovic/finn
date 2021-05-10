@@ -82,7 +82,7 @@ class Vector_Vector_Activate_Batch(HLSCustomOp):
                 if abs(tdt_min) > tdt_max:
                     tdt = DataType.get_smallest_possible(tdt_min)
                 else:
-                    tdt = DataType.get_smallest_possible(0 - tdt_max)
+                    tdt = DataType.get_smallest_possible(0 - (tdt_max+1))
             else:
                 tdt = DataType.get_smallest_possible(tdt_max)
             assert np.vectorize(tdt.allowed)(threshold_tensor).all(), (
