@@ -12,11 +12,12 @@ gecho () {
 
 # checkout the correct dependency repo commits
 # the repos themselves are cloned in the Dockerfile
-FINN_BASE_COMMIT=2c08044c5e9011c19911e731a18ac20d775bbf46
+#FINN_BASE_COMMIT=2c08044c5e9011c19911e731a18ac20d775bbf46
+FINN_BASE_COMMIT=844783de9608dd5eeed3fcfc9e2576bf6c0ef5c8
 FINN_EXP_COMMIT=e9f97dcdb4db2f889b0f36af079a6a1792b7d4de
 BREVITAS_COMMIT=d82c286082c35b29da0c9f92597c0b781cf4c8ac
 CNPY_COMMIT=4e8810b1a8637695171ed346ce68f6984e585ef4
-HLSLIB_COMMIT=a14690e80860fb781830d4630ea5587693488489
+#HLSLIB_COMMIT=a14690e80860fb781830d4630ea5587693488489
 PYVERILATOR_COMMIT=e2ff74030de3992dcac54bf1b6aad2915946e8cb
 OMX_COMMIT=1bae737669901e762f581af73348332b5c4b2ada
 
@@ -41,9 +42,9 @@ gecho "cnpy @ $CNPY_COMMIT"
 git -C /workspace/cnpy pull --quiet
 git -C /workspace/cnpy checkout $CNPY_COMMIT --quiet
 # FINN hlslib
-gecho "finn-hlslib @ $HLSLIB_COMMIT"
-git -C /workspace/finn-hlslib pull --quiet
-git -C /workspace/finn-hlslib checkout $HLSLIB_COMMIT --quiet
+#gecho "finn-hlslib @ $HLSLIB_COMMIT"
+#git -C /workspace/finn-hlslib pull --quiet
+#git -C /workspace/finn-hlslib checkout $HLSLIB_COMMIT --quiet
 # PyVerilator
 gecho "PyVerilator @ $PYVERILATOR_COMMIT"
 git -C /workspace/pyverilator pull --quiet
