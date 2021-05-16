@@ -91,8 +91,7 @@ from finn.transformation.fpgadataflow.replace_verilog_relpaths import (
 from finn.transformation.fpgadataflow.annotate_resources import AnnotateResources
 from finn.util.basic import alveo_part_map, alveo_default_platform
 
-#build_dir = os.environ["FINN_BUILD_DIR"]
-build_dir = "/shares/bulk/mmrahorovic/data"
+build_dir = os.environ["FINN_BUILD_DIR"]
 mem_mode = "decoupled"
 test_board = "U280"
 test_platform = alveo_default_platform[test_board]
@@ -218,6 +217,7 @@ def test_end2end_quartznet_repartition():
             model = model.transform(PartitionFromDict(partitionings[5], build_dir+"/partitioning_repartition"))
             break
 
+    model = model.transform(GiveUniqueNodeNames())
     model.save(build_dir+"/end2end_quartznet_lowered_partitioned.onnx")
 
 def test_end2end_quartznet_convert_to_hls_layers():
@@ -351,22 +351,24 @@ def test_end2end_quartznet_cppsim():
 def test_end2end_quartznet_gen_hls_ip():
     model = load_test_checkpoint_or_skip(build_dir+"/end2end_quartznet_folded.onnx")
 
-    start = time.time()
     for n in model.graph.node:
         if n.op_type=="GenericPartition":
+            start = time.time()
+
             path_to_partition = get_by_name(n.attribute, "model", "name").s.decode('utf-8')
             model_partition = ModelWrapper(path_to_partition)
             model_partition = model_partition.transform(PrepareIP(test_fpga_part, target_clk_ns))
+            model_partition.save(path_to_partition)
             model_partition = model_partition.transform(HLSSynthIP())
             model_partition = model_partition.transform(ReplaceVerilogRelPaths())
             model_partition = model_partition.transform(AnnotateResources("hls"))
             model_partition.save(path_to_partition)
-    end = time.time()
 
-    elapsed_time = end - start
-    f = open(build_dir + "/end2end_mobilenet_ipgen_time.txt", "w+")
-    f.write("Execution time in seconds: " + str(elapsed_time))
-    f.close()
+            end = time.time()
+            elapsed_time = end - start
+            f = open(build_dir + "/end2end_quartznet_ipgen_time_"+str(n.name)+".txt", "w+")
+            f.write("Execution time in seconds: " + str(elapsed_time))
+            f.close()
 
     model.save(build_dir+"/end2end_quartznet_ipgen.onnx")
 
