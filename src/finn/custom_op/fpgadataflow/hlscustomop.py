@@ -87,9 +87,11 @@ class HLSCustomOp(CustomOp):
             "cycles_estimate": ("i", False, 0),
             "rtlsim_trace": ("s", False, ""),
             "res_estimate": ("s", False, ""),
-            "res_hls": ("s", False, ""),
+            "res_hls": ("s", False, "-"),
             "res_synth": ("s", False, ""),
             "rtlsim_so": ("s", False, ""),
+            "est_clk_hls": ("s", False, "-"),
+            "est_latency_hls": ("s", False, "-"),
             # partitioning info
             # ID of SLR to which the Op is attached in Vitis builds
             # Set to -1 as 'don't care'
