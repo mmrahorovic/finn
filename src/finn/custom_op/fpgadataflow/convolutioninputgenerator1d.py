@@ -298,7 +298,7 @@ class ConvolutionInputGenerator1D(HLSCustomOp):
             )
         else:
             ram_luts = 0
-        return 300 + ram_luts
+        return math.ceil((300 + ram_luts)/30)
 
     def uram_estimation(self):
         # NOTE: not tested for correctness
