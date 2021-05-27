@@ -26,9 +26,9 @@ class Vector_Vector_Activate_Batch(HLSCustomOp):
     def get_nodeattr_types(self):
         my_attrs = {
             "PE": ("i", True, 0),
-            "Dim": ("ints", True, []),  # [H, W]
+            "Dim": ("ints", True, []), # [H, W]
             "Channels": ("i", True, 0),
-            "Kernel": ("ints", True, []),  # [H, W]
+            "Kernel": ("ints", True, []), # [H, W]
             "resType": ("s", False, "auto", {"auto", "lut", "dsp"}),
             "ActVal": ("i", False, 0),
             # FINN DataTypes for inputs, weights, outputs
@@ -82,14 +82,12 @@ class Vector_Vector_Activate_Batch(HLSCustomOp):
                 if abs(tdt_min) > tdt_max:
                     tdt = DataType.get_smallest_possible(tdt_min)
                 else:
-                    tdt = DataType.get_smallest_possible(0 - tdt_max)
+                    tdt = DataType.get_smallest_possible(0 - (tdt_max+1))
             else:
                 tdt = DataType.get_smallest_possible(tdt_max)
-            assert np.vectorize(tdt.allowed)(
-                threshold_tensor
-            ).all(), "Thresholds in %s can't be expressed with type %s" % (
-                self.onnx_node.name,
-                str(tdt),
+            assert np.vectorize(tdt.allowed)(threshold_tensor).all(), (
+                "Thresholds in %s can't be expressed with type %s"
+                % (self.onnx_node.name, str(tdt))
             )
             self.set_nodeattr("accDataType", tdt.name)
         else:
@@ -340,11 +338,9 @@ class Vector_Vector_Activate_Batch(HLSCustomOp):
                 threshold_tensor = self.get_hls_compatible_threshold_tensor(thresholds)
                 # get computed threshold datatype from attribute
                 tdt = DataType[self.get_nodeattr("accDataType")]
-                assert np.vectorize(tdt.allowed)(
-                    threshold_tensor
-                ).all(), "Thresholds in %s can't be expressed with type %s" % (
-                    self.onnx_node.name,
-                    str(tdt),
+                assert np.vectorize(tdt.allowed)(threshold_tensor).all(), (
+                    "Thresholds in %s can't be expressed with type %s"
+                    % (self.onnx_node.name, str(tdt))
                 )
                 thresholds_hls_code = numpy_to_hls_code(
                     threshold_tensor, tdt, "thresholds", False, True
