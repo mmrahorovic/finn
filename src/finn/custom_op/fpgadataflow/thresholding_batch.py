@@ -678,6 +678,7 @@ class Thresholding_Batch(HLSCustomOp):
         if len(ishape) == 3:
             imgdim = 1
         elif len(ishape) == 5:
+            #imgdim = ishape[1]*ishape[2]
             imgdim = ishape[1]
         else:
             raise Exception("""Unexpeted input shape""")
