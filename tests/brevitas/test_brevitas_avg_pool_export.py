@@ -5,7 +5,7 @@ import torch
 import numpy as np
 import brevitas.onnx as bo
 from brevitas.nn import QuantAvgPool2d
-from brevitas.quant_tensor import pack_quant_tensor
+#from brevitas.quant_tensor import pack_quant_tensor
 from brevitas.core.quant import QuantType
 from finn.core.modelwrapper import ModelWrapper
 from finn.core.datatype import DataType
