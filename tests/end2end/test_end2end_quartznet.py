@@ -463,7 +463,7 @@ def test_end2end_quartznet_gen_hls_ip():
 
             report_dir = build_dir + "/report"
             os.makedirs(report_dir, exist_ok=True)
-            estimate_layer_resources_hls = model.analysis(hls_synth_res_estimation)
+            estimate_layer_resources_hls = model_partition.analysis(hls_synth_res_estimation)
             with open(report_dir + "/estimate_layer_resources_hls.json", "w") as f:
                 json.dump(estimate_layer_resources_hls, f, indent=2)
 
