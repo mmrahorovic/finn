@@ -445,6 +445,7 @@ def test_end2end_quartznet_generate_estimate_reports():
 
             model_partition.save(path_to_partition)
 
+
 def test_end2end_quartznet_gen_hls_ip():
     model = load_test_checkpoint_or_skip(build_dir+"/end2end_quartznet_cppsim.onnx")
 
@@ -475,6 +476,7 @@ def test_end2end_quartznet_gen_hls_ip():
     f.close()
 
     model.save(build_dir+"/end2end_quartznet_ipgen.onnx")
+
 
 def test_end2end_quartznet_set_fifo_depths():
     model = load_test_checkpoint_or_skip(build_dir+"/end2end_quartznet_ipgen.onnx")
@@ -549,6 +551,7 @@ def test_end2end_quartznet_create_stitched_ip():
 def test_end2end_quartznet_rtlsim():
     model = load_test_checkpoint_or_skip(build_dir + "/end2end_quartznet_stitched_ip.onnx")
 
+    start = time.time()
     for n in model.graph.node:
         if n.op_type=="StreamingDataflowPartition":
             path_to_partition = get_by_name(n.attribute, "model", "name").s.decode('utf-8')
@@ -563,6 +566,10 @@ def test_end2end_quartznet_rtlsim():
             verify_model = verify_model.transform(PrepareRTLSim())
             verify_model.set_metadata_prop("exec_mode", "rtlsim")
             verify_step(verify_model, "stitched_ip_rtlsim")
+    end = time.time()
+    f = open(build_dir + "/end2end_quartznet_rtlsim_time.txt", "w+")
+    f.write("Execution time in seconds: " + str(elapsed_time))
+    f.close()
 
 
 def test_end2end_quartznet_rtlsim_performance():
