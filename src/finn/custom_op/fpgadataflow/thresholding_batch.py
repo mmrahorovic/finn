@@ -678,7 +678,8 @@ class Thresholding_Batch(HLSCustomOp):
         if len(ishape) == 3:
             imgdim = 1
         elif len(ishape) == 5:
-            imgdim = ishape[1]
+            #imgdim = ishape[1]
+            imgdim = ishape[1]*ishape[2]
         else:
             raise Exception("""Unexpeted input shape""")
         mem_mode = self.get_nodeattr("mem_mode")
