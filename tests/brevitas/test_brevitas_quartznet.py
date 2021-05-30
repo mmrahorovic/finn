@@ -60,8 +60,9 @@ def test_brevitas_quartznet_onnx_export_and_exec():
     # generate a random test vector
     iname = model.graph.input[0].name
     oname = model.graph.output[0].name
-    np.random.seed(42)
-    rand_inp = gen_finn_dt_tensor(idt, ishape)
+    #np.random.seed(42)
+    #rand_inp = gen_finn_dt_tensor(idt, ishape)
+    rand_inp = np.load("/workspace/results/librispeech_data/input_sample_0.npy") # random input, but will generate some words for output instead of complete garbage (i.e. all 28's)
     # run using FINN-based execution
     input_dict = {iname: rand_inp}
     output_dict = oxe.execute_onnx(model, input_dict)
@@ -70,5 +71,7 @@ def test_brevitas_quartznet_onnx_export_and_exec():
     rand_inp_torch = torch.from_numpy(rand_inp).float()
     # do forward pass in PyTorch/Brevitas
     expected = quartznet_torch.forward(rand_inp_torch).detach().numpy()
-    assert np.isclose(produced, expected, atol=1e-3).all()
     model.save("/tmp/quartznet_export.onnx")
+    np.save("/tmp/produced.npy", produced)
+    np.save("/tmp/expected.npy", expected)
+    assert np.isclose(produced, expected, atol=1e-3).all()
