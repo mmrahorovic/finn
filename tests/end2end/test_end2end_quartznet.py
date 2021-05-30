@@ -28,9 +28,16 @@
 
 import time
 import os
+import json
 import pathlib
 import pytest
 import numpy as np
+
+import finn.core.onnx_exec as oxe
+from finn.transformation.fold_constants import FoldConstants
+from finn.transformation.general import RemoveStaticGraphInputs
+from finn.transformation.general.infer_shapes import InferShapes
+import brevitas_examples.speech_to_text as stt
 
 from finn.custom_op.registry import getCustomOp
 from finn.util.test import (
@@ -89,18 +96,86 @@ from finn.transformation.fpgadataflow.replace_verilog_relpaths import (
     ReplaceVerilogRelPaths,
 )
 from finn.transformation.fpgadataflow.annotate_resources import AnnotateResources
+from finn.transformation.fpgadataflow.set_folding import SetFolding
 from finn.util.basic import alveo_part_map, alveo_default_platform
+from finn.util.config import extract_model_config_to_json
+from finn.transformation.fpgadataflow.set_fifo_depths import InsertAndSetFIFODepths
+from finn.transformation.fpgadataflow.create_stitched_ip import CreateStitchedIP
+from finn.transformation.fpgadataflow.annotate_cycles import AnnotateCycles
+from finn.analysis.fpgadataflow.exp_cycles_per_layer import exp_cycles_per_layer
+from finn.analysis.fpgadataflow.res_estimation import (
+    res_estimation,
+    res_estimation_complete
+)
+from finn.analysis.fpgadataflow.op_and_param_counts import (
+    aggregate_dict_keys,
+    op_and_param_counts
+)
+from finn.analysis.fpgadataflow.dataflow_performance import dataflow_performance
+from finn.analysis.fpgadataflow.hls_synth_res_estimation import hls_synth_res_estimation
+from finn.transformation.fpgadataflow.prepare_rtlsim import PrepareRTLSim
+from finn.core.throughput_test import throughput_test_rtlsim
+from copy import deepcopy
 
-#build_dir = os.environ["FINN_BUILD_DIR"]
-build_dir = "/shares/bulk/mmrahorovic/data"
+build_dir = os.environ["FINN_BUILD_DIR"]
 mem_mode = "decoupled"
-test_board = "U280"
+test_board = "U250"
 test_platform = alveo_default_platform[test_board]
 test_fpga_part = alveo_part_map[test_board]
-target_clk_ns = 10
+target_clk_ns = 1
 
 
-def test_end2end_quartznet_tidy_and_change_shape_tensors():
+def verify_step(model, step_name):
+    print("Running verification for: {} ...".format(step_name), end="", flush=True)
+
+    if step_name=="brevitas_export":
+        quartznet_torch = stt.quant_quartznet_perchannelscaling_4b(export_mode=True)
+        iname = model.graph.input[0].name
+        oname = model.graph.output[0].name
+        inp_val = np.load("/workspace/results/librispeech_data/input_sample_0.npy")
+        input_dict = {iname: inp_val}
+        # Execute FINN-base simulation
+        output_dict = oxe.execute_onnx(model, input_dict)
+        produced = output_dict[oname]
+        # Save QuartzNet export output, which will be used as reference for other transformations
+        np.save("/workspace/results/librispeech_data/quartznet_export_output.npy")
+        # Execute Pytorch/Brevitas simulation
+        inp_val_torch = torch.from_numpy(inp_val).float()
+        # Do forward pass and compare output
+        expected = quartznet_torch.forward(inp_val_torch).detach().numpy()
+    else:
+        iname = model.graph.input[0].name
+        oname = model.graph.output[0].name
+        inp_val = np.load("/workspace/results/librispeech_data/input_sample_0.npy")
+        input_dict = {iname: inp_val}
+        # Execute FINN simulation
+        output_dict = oxe.execute_onnx(model, input_dict)
+        produced = output_dict[oname]
+        # Compare against golden output (QuartzNet exported model)
+        expected = np.load("/workspace/results/librispeech_data/quartznet_export_output.npy")
+
+    res = np.isclose(expected, produced, atol=1e-3).all() # basically the same as np.array_equal(expected, produced) for integer outputs
+    res_to_str = {True: "SUCCESS", False: "FAIL"}
+    res_str = res_to_str[res]
+    print(res_str)
+
+
+def test_end2end_quartznet_brevitas_export(verify=False):
+    finn_onnx = build_dir+"/end2end_quartznet_export_dev.onnx"
+    quartznet_torch = stt.quant_quartznet_perchannelscaling_4b(export_mode=True)
+    ishape = (1, 64, 256)
+    bo.export_finn_onnx(quartznet_torch, ishape, finn_onnx)
+    model = ModelWrapper(finn_onnx)
+    model = model.transform(InferShapes())
+    model = model.transform(FoldConstants())
+    model = model.transform(RemoveStaticGraphInputs())
+
+    model.save(finn_onnx)
+    if verify:
+        verify_step(model, "brevitas_export")
+
+
+def test_end2end_quartznet_tidy_and_change_shape_tensors(verify=False):
     model = load_test_checkpoint_or_skip(build_dir+"/end2end_quartznet_export_dev.onnx")
 
     model = model.transform(GiveUniqueNodeNames())
@@ -112,8 +187,10 @@ def test_end2end_quartznet_tidy_and_change_shape_tensors():
     model = model.transform(Change3DTo4DTensors())
 
     model.save(build_dir+"/end2end_quartznet_tidy.onnx")
+    if verify:
+        verify_step(model, "tidy_and_change_shape_tensors")
 
-def test_end2end_quartznet_streamline():
+def test_end2end_quartznet_streamline(verify=False):
     model = load_test_checkpoint_or_skip(build_dir+"/end2end_quartznet_tidy.onnx")
 
     # Absorb sign bias from export into MultiThreshold node
@@ -156,8 +233,10 @@ def test_end2end_quartznet_streamline():
     model = model.transform(GiveUniqueParameterTensors())
 
     model.save(build_dir+"/end2end_quartznet_streamline.onnx")
+    if verify:
+        verify_step(model, "streamline")
 
-def test_end2end_quartznet_lowering():
+def test_end2end_quartznet_lowering(verify=False):
     model = load_test_checkpoint_or_skip(build_dir+"/end2end_quartznet_streamline.onnx")
     partitionings = {0: range(0, 3),
                     1: range(3, 75),
@@ -184,7 +263,7 @@ def test_end2end_quartznet_lowering():
 
     model.save(build_dir+"/end2end_quartznet_lowered.onnx")
 
-def test_end2end_quartznet_repartition():
+def test_end2end_quartznet_repartition(verify=False):
     model = load_test_checkpoint_or_skip(build_dir+"/end2end_quartznet_lowered.onnx")
     partitionings = [{0: range(0,4), 1: range(4, 34), 2: range(34, 63), 3: range(63, 92)},
                      {4: range(4, 33), 5: range(33, 62), 6: range(62, 91)},
@@ -218,6 +297,7 @@ def test_end2end_quartznet_repartition():
             model = model.transform(PartitionFromDict(partitionings[5], build_dir+"/partitioning_repartition"))
             break
 
+    model = model.transform(GiveUniqueNodeNames())
     model.save(build_dir+"/end2end_quartznet_lowered_partitioned.onnx")
 
 def test_end2end_quartznet_convert_to_hls_layers():
@@ -240,8 +320,6 @@ def test_end2end_quartznet_convert_to_hls_layers():
             model_partition = model_partition.transform(to_hls.InferAddStreamsLayer(), make_deepcopy=False)
             model_partition = model_partition.transform(to_hls.InferDuplicateStreamsLayer(), make_deepcopy=False)
 
-            model_partition = model_partition.transform(GiveUniqueNodeNames(prefix))
-
             #pathlib.Path(self.partition_dir).mkdir(parents=True, exist_ok=True)
             #partition_path = partition_dir+"/partition_"+str(partition_id)+".onnx"
             model_partition.save(path_to_partition)
@@ -252,87 +330,61 @@ def test_end2end_quartznet_convert_to_hls_layers():
     model.save(build_dir+"/end2end_quartznet_hls_layers.onnx")
 
 
-def test_end2end_quartznet_folding():
+def test_end2end_create_dataflow_partition():
     model = load_test_checkpoint_or_skip(build_dir+"/end2end_quartznet_hls_layers.onnx")
 
-    for n_par in model.graph.node:
-        if n_par.op_type=="GenericPartition":
-            path_to_partition = get_by_name(n_par.attribute, "model", "name").s.decode('utf-8')
+    # Extend partitions, as the HLS model can now be contained in a single ONNX file
+    list_of_partitions = list(range(0, 17))
+    model = model.transform(ExtendPartition(list_of_partitions))
+    # Give unique node names
+    model = model.transform(GiveUniqueNodeNames())
+    # Create fpgadataflow partition node for consistency
+    model = model.transform(CreateDataflowPartition())
+
+    model.save(build_dir+"/end2end_quartznet_dataflow_partition.onnx")
+
+
+def test_end2end_quartznet_folding(verify=False):
+    model = load_test_checkpoint_or_skip(build_dir+"/end2end_quartznet_dataflow_partition.onnx")
+
+    for n in model.graph.node:
+        if n.op_type=="StreamingDataflowPartition":
+            path_to_partition = get_by_name(n.attribute, "model", "name").s.decode('utf-8')
             model_partition = ModelWrapper(path_to_partition)
-            for n in model_partition.graph.node:
-                if n.op_type=="StreamingFCLayer_Batch":
-                    # Initial:
-                    # SIMD=1
-                    # PE=1
-                    inst = getCustomOp(n)
-                    mh = get_by_name(n.attribute, "MH", "name").i
-                    mw = get_by_name(n.attribute, "MW", "name").i
-                    if mh==29: # Check if we are at final node (TODO: make generic...)
-                        assert(mw%4==0)
-                        mh = 1
-                    else:
-                        assert(mh%4==0 and mw%4==0)
-                        mh = int(mh/4)
-                    mw = int(mw/4)
-                    if n.name == "pt_1_StreamingFCLayer_Batch_0":
-                        inst.set_nodeattr("PE", mw) # mh % PE ==0
-                        inst.set_nodeattr("SIMD", mw) # mw % SIMD ==0
-                    else:
-                        inst.set_nodeattr("PE", mh) # mh % PE ==0
-                        inst.set_nodeattr("SIMD", mw) # mw % SIMD ==0
-                if n.op_type=="Vector_Vector_Activate_Batch":
-                    # Initial: PE = IFM_CH
-                    inst = getCustomOp(n)
-                    ifc = get_by_name(n.attribute, "Channels", "name").i
-                    assert(ifc%4==0)
-                    ifc = int(ifc/4)
-                    inst.set_nodeattr("PE", ifc) # CH % PE == 0
-                if n.op_type=="Thresholding_Batch":
-                    # Initial: PE = 1
-                    inst = getCustomOp(n)
-                    ifc = get_by_name(n.attribute, "NumChannels", "name").i
-                    assert(ifc%4==0)
-                    ifc = int(ifc/4)
-                    inst.set_nodeattr("PE", ifc) # CH % PE == 0
-                if n.op_type=="AddStreams_Batch":
-                    # Initial: PE = 1
-                    inst = getCustomOp(n)
-                    ifc = get_by_name(n.attribute, "NumChannels", "name").i
-                    assert(ifc%4==0)
-                    ifc = int(ifc/4)
-                    inst.set_nodeattr("PE", ifc) # CH % PE == 0
-                if n.op_type=="DuplicateStreams_Batch":
-                    # Initial: PE = 1
-                    inst = getCustomOp(n)
-                    ifc = get_by_name(n.attribute, "NumChannels", "name").i
-                    assert(ifc%4==0)
-                    ifc = int(ifc/4)
-                    inst.set_nodeattr("PE", ifc) # CH % PE == 0
-                if n.op_type=="FMPadding_Batch":
-                    # SIMD = IFM_CH
-                    inst = getCustomOp(n)
-                    ifc = get_by_name(n.attribute, "NumChannels", "name").i
-                    assert(ifc%4==0)
-                    ifc = int(ifc/4)
-                    inst.set_nodeattr("SIMD", ifc) # CH % PE == 0
-                if n.op_type=="ConvolutionInputGenerator1D":
-                    # SIMD = IFM_CH
-                    inst = getCustomOp(n)
-                    ifc = get_by_name(n.attribute, "IFMChannels", "name").i
-                    assert(ifc%4==0)
-                    ifc = int(ifc/4)
-                    inst.set_nodeattr("SIMD", ifc) # CH % PE == 0
+            model_partition = model_partition.transform(SetFolding(target_cycles_per_frame=4200000))
+
+            for n_par in model_partition.graph.node:
+                inst = getCustomOp(n_par)
+                if n_par.op_type in ["FMPadding_Batch", "DuplicateStreams_Batch", "AddStreams_Batch"]:
+                    continue
+                elif n_par.op_type=="ConvolutionInputGenerator1D":
+                    inst.set_nodeattr("ram_style", "distributed")
+                elif n_par.op_type=="Vector_Vector_Activate_Batch":
+                    inst.set_nodeattr("resType", "dsp")
+                elif n_par.op_type=="StreamingFCLayer_Batch":
+                    inst.set_nodeattr("resType", "dsp")
+                    inst.set_nodeattr("ram_style", "ultra")
+                    inst.set_nodeattr("mem_mode", "decoupled")
+                    if inst.get_nodeattr("ram_style")=="ultra":
+                        inst.set_nodeattr("runtime_writeable_weights", 1)
+                elif n_par.op_type=="Thresholding_Batch":
+                    inst.set_nodeattr("ram_style", "distributed")
+                    inst.set_nodeattr("mem_mode", "const")
+                else:
+                    print("Missed: {} in folding!".format(n_par.op_type))
+                    break
+
             model_partition.save(path_to_partition)
 
     model.save(build_dir+"/end2end_quartznet_folded.onnx")
 
 
-def test_end2end_quartznet_cppsim():
+def test_end2end_quartznet_cppsim(verify=False):
     model = load_test_checkpoint_or_skip(build_dir+"/end2end_quartznet_folded.onnx")
 
     start = time.time()
     for n in model.graph.node:
-        if n.op_type=="GenericPartition":
+        if n.op_type=="StreamingDataflowPartition":
             path_to_partition = get_by_name(n.attribute, "model", "name").s.decode('utf-8')
             model_partition = ModelWrapper(path_to_partition)
             model_partition = model_partition.transform(PrepareCppSim())
@@ -347,34 +399,264 @@ def test_end2end_quartznet_cppsim():
     f.close()
 
     model.save(build_dir + "/end2end_quartznet_cppsim.onnx")
+    if verify:
+        verify_step(model, "cppsim")
+
+
+def test_end2end_quartznet_generate_estimate_reports():
+    # See https://github.com/Xilinx/finn/blob/dev/src/finn/builder/build_dataflow_steps.py
+    model = load_test_checkpoint_or_skip(build_dir + "/end2end_quartznet_cppsim.onnx")
+    report_dir = build_dir + "/report"
+    os.makedirs(report_dir, exist_ok=True)
+
+    for n in model.graph.node:
+        if n.op_type=="StreamingDataflowPartition":
+            path_to_partition = get_by_name(n.attribute, "model", "name").s.decode('utf-8')
+            model_partition = ModelWrapper(path_to_partition)
+            ops_and_params = model_partition.analysis(op_and_param_counts)
+            with open(report_dir + "/op_and_param_counts.json", "w") as f:
+                json.dump(ops_and_params, f, indent=2)
+            estimate_layer_cycles = model_partition.analysis(exp_cycles_per_layer)
+            with open(report_dir + "/estimate_layer_cycles.json", "w") as f:
+                json.dump(estimate_layer_cycles, f, indent=2)
+            estimate_layer_resources = model_partition.analysis(res_estimation)
+            estimate_layer_resources["total"] = aggregate_dict_keys(
+                estimate_layer_resources
+            )
+            with open(report_dir + "/estimate_layer_resources.json", "w") as f:
+                json.dump(estimate_layer_resources, f, indent=2)
+            estimate_layer_resources_complete = model_partition.analysis(res_estimation_complete)
+            with open(report_dir + "/estimate_layer_config_alternatives.json", "w") as f:
+                json.dump(estimate_layer_resources_complete, f, indent=2)
+            # need to call AnnotateCycles before dataflow_performance
+            model_partition = model_partition.transform(AnnotateCycles())
+            estimate_network_performance = model_partition.analysis(dataflow_performance)
+            # add some more metrics to estimated performance
+            n_clock_cycles_per_sec = (10 ** 9) / target_clk_ns
+            est_fps = n_clock_cycles_per_sec / estimate_network_performance["max_cycles"]
+            estimate_network_performance["estimated_throughput_fps"] = est_fps
+            est_latency_ns = (
+                estimate_network_performance["critical_path_cycles"]
+                * target_clk_ns
+            )
+            estimate_network_performance["estimated_latency_ns"] = est_latency_ns
+            with open(report_dir + "/estimate_network_performance.json", "w") as f:
+                json.dump(estimate_network_performance, f, indent=2)
+
+            model_partition.save(path_to_partition)
 
 def test_end2end_quartznet_gen_hls_ip():
-    model = load_test_checkpoint_or_skip(build_dir+"/end2end_quartznet_folded.onnx")
+    model = load_test_checkpoint_or_skip(build_dir+"/end2end_quartznet_cppsim.onnx")
 
     start = time.time()
     for n in model.graph.node:
-        if n.op_type=="GenericPartition":
+        if n.op_type=="StreamingDataflowPartition":
             path_to_partition = get_by_name(n.attribute, "model", "name").s.decode('utf-8')
             model_partition = ModelWrapper(path_to_partition)
+
             model_partition = model_partition.transform(PrepareIP(test_fpga_part, target_clk_ns))
+            model_partition.save(path_to_partition)
             model_partition = model_partition.transform(HLSSynthIP())
             model_partition = model_partition.transform(ReplaceVerilogRelPaths())
             model_partition = model_partition.transform(AnnotateResources("hls"))
             model_partition.save(path_to_partition)
+
+            report_dir = build_dir + "/report"
+            os.makedirs(report_dir, exist_ok=True)
+            estimate_layer_resources_hls = model.analysis(hls_synth_res_estimation)
+            with open(report_dir + "/estimate_layer_resources_hls.json", "w") as f:
+                json.dump(estimate_layer_resources_hls, f, indent=2)
+
     end = time.time()
 
     elapsed_time = end - start
-    f = open(build_dir + "/end2end_mobilenet_ipgen_time.txt", "w+")
+    f = open(build_dir + "/end2end_quartznet_ipgen_time.txt", "w+")
     f.write("Execution time in seconds: " + str(elapsed_time))
     f.close()
 
     model.save(build_dir+"/end2end_quartznet_ipgen.onnx")
 
+def test_end2end_quartznet_set_fifo_depths():
+    model = load_test_checkpoint_or_skip(build_dir+"/end2end_quartznet_ipgen.onnx")
+
+    start = time.time()
+    for n in model.graph.node:
+        if n.op_type=="StreamingDataflowPartition":
+            path_to_partition = get_by_name(n.attribute, "model", "name").s.decode('utf-8')
+            model_partition = ModelWrapper(path_to_partition)
+            # TODO: add Vivado ram style after inspecting resource utilization
+            model_partition = model_partition.transform(InsertAndSetFIFODepths(test_fpga_part, target_clk_ns))
+            model_partition.save(path_to_partition)
+
+    end = time.time()
+    f = open(build_dir + "/end2end_quartznet_setfifo_time.txt", "w+")
+    f.write("Execution time in seconds: " + str(elapsed_time))
+    f.close()
+
+    # extract the final configuration and save it as json
+    hw_attrs = [
+        "PE",
+        "SIMD",
+        "ram_style",
+        "depth",
+        "impl_style",
+        "resType",
+        "mem_mode",
+        "runtime_writeable_weights",
+    ]
+
+    for n in model.graph.node:
+        if n.op_type=="StreamingDataflowPartition":
+            path_to_partition = get_by_name(n.attribute, "model", "name").s.decode('utf-8')
+            model_partition = ModelWrapper(path_to_partition)
+            extract_model_config_to_json(
+                model_partition, build_dir + "/final_hw_config.json", hw_attrs
+            )
+
+            start = time.time()
+            # after FIFOs are ready to go, call PrepareIP and HLSSynthIP again
+            model_partition = model_partition.transform(PrepareIP(test_fpga_part, target_clk_ns))
+            model_partition.save(path_to_partition)
+            model_partition = model_partition.transform(HLSSynthIP())
+            model_partition.save(path_to_partition)
+            end = time.time()
+            f = open(build_dir + "/end2end_quartznet_fifo_hlssynth.txt", "w+")
+            f.write("Execution time in seconds: " + str(elapsed_time))
+            f.close()
+
+    model.save(build_dir+"/end2end_quartznet_fifos.onnx")
+
+
+def test_end2end_quartznet_create_stitched_ip():
+    model = load_test_checkpoint_or_skip(build_dir + "/end2end_quartznet_fifos.onnx")
+
+    start = time.time()
+    for n in model.graph.node:
+        if n.op_type=="StreamingDataflowPartition":
+            path_to_partition = get_by_name(n.attribute, "model", "name").s.decode('utf-8')
+            model_partition = ModelWrapper(path_to_partition)
+            model_partition = model_partition.transform(CreateStitchedIP(test_fpga_part, target_clk_ns))
+            model_partition.save(path_to_partition)
+
+    end = time.time()
+    f = open(build_dir + "/end2end_quartznet_stitchedip_time.txt", "w+")
+    f.write("Execution time in seconds: " + str(elapsed_time))
+    f.close()
+
+    model.save(build_dir + "/end2end_quartznet_stitched_ip.onnx")
+
+
+def test_end2end_quartznet_rtlsim():
+    model = load_test_checkpoint_or_skip(build_dir + "/end2end_quartznet_stitched_ip.onnx")
+
+    for n in model.graph.node:
+        if n.op_type=="StreamingDataflowPartition":
+            path_to_partition = get_by_name(n.attribute, "model", "name").s.decode('utf-8')
+            model_partition = ModelWrapper(path_to_partition)
+            verify_model = deepcopy(model_partition)
+            # rtlsim only supports impl_style=rtl for StreamingFIFO, ensure that
+            for fifo_layer in verify_model.get_nodes_by_op_type("StreamingFIFO"):
+                getCustomOp(fifo_layer).set_nodeattr("impl_style", "rtl")
+            # similarly for StreamingDataWidthConverter with impl_style=hls
+            for dwc_layer in verify_model.get_nodes_by_op_type("StreamingDataWidthConverter_Batch"):
+                getCustomOp(dwc_layer).set_nodeattr("impl_style", "hls")
+            verify_model = verify_model.transform(PrepareRTLSim())
+            verify_model.set_metadata_prop("exec_mode", "rtlsim")
+            verify_step(verify_model, "stitched_ip_rtlsim")
+
+
+def test_end2end_quartznet_rtlsim_performance():
+    model = load_test_checkpoint_or_skip(build_dir + "/end2end_quartznet_stitched_ip.onnx")
+
+    for n in model.graph.node:
+        if n.op_type=="StreamingDataflowPartition":
+            path_to_partition = get_by_name(n.attribute, "model", "name").s.decode('utf-8')
+            model_partition = ModelWrapper(path_to_partition)
+            # prepare ip-stitched rtlsim
+            rtlsim_model = deepcopy(model_partition)
+            # rtlsim only supports impl_style=rtl for StreamingFIFO, ensure that
+            for fifo_layer in rtlsim_model.get_nodes_by_op_type("StreamingFIFO"):
+                getCustomOp(fifo_layer).set_nodeattr("impl_style", "rtl")
+            # similarly for StreamingDataWidthConverter with impl_style=hls
+            for dwc_layer in rtlsim_model.get_nodes_by_op_type("StreamingDataWidthConverter_Batch"):
+                getCustomOp(dwc_layer).set_nodeattr("impl_style", "hls")
+            rtlsim_model = rtlsim_model.transform(PrepareRTLSim())
+            rtlsim_model.set_metadata_prop("exec_mode", "rtlsim")
+            # run with single input to get latency
+            rtlsim_perf_dict = throughput_test_rtlsim(rtlsim_model, 1)
+            rtlsim_latency = rtlsim_perf_dict["cycles"]
+            # run with num inputs equal to layers to fill the whole pipeline
+            # to get the steady-state throughput
+            rtlsim_bs = len(rtlsim_model.graph.node)
+            rtlsim_perf_dict = throughput_test_rtlsim(rtlsim_model, rtlsim_bs)
+            rtlsim_perf_dict["latency_cycles"] = rtlsim_latency
+            report_dir = build_dir + "/report"
+            os.makedirs(report_dir, exist_ok=True)
+            with open(report_dir + "/rtlsim_performance.json", "w") as f:
+                json.dump(rtlsim_perf_dict, f, indent=2)
+
+
+def test_end2end_quartznet_ooc(verify=False):
+    model = load_test_checkpoint_or_skip(build_dir + "/end2end_quartznet_stitched_ip.onnx")
+
+    start = time.time()
+    for n in model.graph.node:
+        if n.op_type=="StreamingDataflowPartition":
+            path_to_partition = get_by_name(n.attribute, "model", "name").s.decode('utf-8')
+            model_partition = ModelWrapper(path_to_partition)
+            model_partition = model_partition.transform(SynthOutOfContext(test_fpga_part, target_clk_ns))
+            model_partition.save(path_to_partition)
+
+            end = time.time()
+            f = open(build_dir + "/end2end_quartznet_ooc_synthesis_time.txt", "w+")
+            f.write("Execution time in seconds: " + str(elapsed_time))
+            f.close()
+
+            report_dir = build_dir + "/report"
+            os.makedirs(report_dir, exist_ok=True)
+            ooc_res_dict = model_partition.get_metadata_prop("res_total_ooc_synth")
+            ooc_res_dict = eval(ooc_res_dict)
+            estimate_network_performance = model_partition.analysis(dataflow_performance)
+            # add some more metrics to estimated performance
+            n_clock_cycles_per_sec = float(ooc_res_dict["fmax_mhz"]) * (10 ** 6)
+            est_fps = n_clock_cycles_per_sec / estimate_network_performance["max_cycles"]
+            ooc_res_dict["estimated_throughput_fps"] = est_fps
+            with open(report_dir + "/ooc_synth_and_timing.json", "w") as f:
+                json.dump(ooc_res_dict, f, indent=2)
+
+    model.save(build_dir + "/end2end_quartznet_ooc.onnx")
+
+
 def test_all():
-    test_end2end_quartznet_tidy_and_change_shape_tensors()
-    test_end2end_quartznet_streamline()
-    test_end2end_quartznet_lowering()
-    test_end2end_quartznet_repartition()
+    print("Brevitas export")
+    test_end2end_quartznet_brevitas_export(verify=True)
+    print("Tidy and change shape tensors")
+    test_end2end_quartznet_tidy_and_change_shape_tensors(verify=True)
+    print("Streamline")
+    test_end2end_quartznet_streamline(verify=True)
+    print("Lowering")
+    test_end2end_quartznet_lowering(verify=True)
+    print("Repartition")
+    test_end2end_quartznet_repartition(verify=True)
+    print("Convert to HLS layers")
     test_end2end_quartznet_convert_to_hls_layers()
+    print("Create dataflow partition")
+    test_end2end_create_dataflow_partition()
+    print("Folding")
     test_end2end_quartznet_folding()
+    print("CPPsim")
+    test_end2end_quartznet_cppsim(verify=True)
+    print("Generate estimate reports")
+    test_end2end_quartznet_generate_estimate_reports()
+    print("Generate RTL and HLS synthesis")
     test_end2end_quartznet_gen_hls_ip()
+    #print("Set FIFO depths")
+    #test_end2end_quartznet_set_fifo_depths()
+    #print("Create stitched IP")
+    #test_end2end_quartznet_create_stitched_ip()
+    #print("RTLsim")
+    #test_end2end_quartznet_rtlsim()
+    #print("RTLsim performance"
+    #test_end2end_quartznet_rtlsim_performance()
+    #print("Out-of-context synthesis")
+    #test_end2end_quartznet_ooc()
