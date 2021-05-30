@@ -12,19 +12,20 @@ gecho () {
 
 # checkout the correct dependency repo commits
 # the repos themselves are cloned in the Dockerfile
-FINN_BASE_COMMIT=ac0b86a63eb937b869bfa453a996a8a8b8506546
+#FINN_BASE_COMMIT=ac0b86a63eb937b869bfa453a996a8a8b8506546
 FINN_EXP_COMMIT=e9f97dcdb4db2f889b0f36af079a6a1792b7d4de
-BREVITAS_COMMIT=14abbe1e7ef82485d79415871fcf5766b0a40a00
+#BREVITAS_COMMIT=14abbe1e7ef82485d79415871fcf5766b0a40a00
+BREVITAS_COMMIT=45c8ccea88a70c6bde0b8fafabd376a86ca18d7f
 CNPY_COMMIT=4e8810b1a8637695171ed346ce68f6984e585ef4
-HLSLIB_COMMIT=4d74baefa79df48b5a0348d63f39a26df075de51
+#HLSLIB_COMMIT=4d74baefa79df48b5a0348d63f39a26df075de51
 PYVERILATOR_COMMIT=e2ff74030de3992dcac54bf1b6aad2915946e8cb
 OMX_COMMIT=1bae737669901e762f581af73348332b5c4b2ada
 
 gecho "Setting up known-good commit versions for FINN dependencies"
 # finn-base
-gecho "finn-base @ $FINN_BASE_COMMIT"
-git -C /workspace/finn-base pull --quiet
-git -C /workspace/finn-base checkout $FINN_BASE_COMMIT --quiet
+#gecho "finn-base @ $FINN_BASE_COMMIT"
+#git -C /workspace/finn-base pull --quiet
+#git -C /workspace/finn-base checkout $FINN_BASE_COMMIT --quiet
 pip install --user -e /workspace/finn-base
 # finn-experimental
 gecho "finn-experimental @ $FINN_EXP_COMMIT"
@@ -41,9 +42,9 @@ gecho "cnpy @ $CNPY_COMMIT"
 git -C /workspace/cnpy pull --quiet
 git -C /workspace/cnpy checkout $CNPY_COMMIT --quiet
 # FINN hlslib
-gecho "finn-hlslib @ $HLSLIB_COMMIT"
-git -C /workspace/finn-hlslib pull --quiet
-git -C /workspace/finn-hlslib checkout $HLSLIB_COMMIT --quiet
+#gecho "finn-hlslib @ $HLSLIB_COMMIT"
+#git -C /workspace/finn-hlslib pull --quiet
+#git -C /workspace/finn-hlslib checkout $HLSLIB_COMMIT --quiet
 # PyVerilator
 gecho "PyVerilator @ $PYVERILATOR_COMMIT"
 git -C /workspace/pyverilator pull --quiet
