@@ -36,8 +36,8 @@ import numpy as np
 import finn.core.onnx_exec as oxe
 from finn.transformation.fold_constants import FoldConstants
 from finn.transformation.general import RemoveStaticGraphInputs
-from finn.transformation.general.infer_shapes import InferShapes
-import brevitas_examples.speech_to_text as stt
+from finn.transformation.infer_shapes import InferShapes
+#import brevitas_examples.speech_to_text as stt
 
 from finn.custom_op.registry import getCustomOp
 from finn.util.test import (
@@ -48,7 +48,6 @@ from finn.core.datatype import DataType
 from finn.util.basic import get_by_name
 
 from finn.transformation.change_3d_tensors_to_4d import Change3DTo4DTensors
-#from finn.transformation.infer_shapes import InferShapes
 from finn.transformation.general import (
     GiveUniqueNodeNames,
     GiveRandomTensorNames,
@@ -87,6 +86,7 @@ from finn.transformation.streamline.reorder import (
 )
 from finn.transformation.extend_partition import ExtendPartition
 import finn.transformation.fpgadataflow.convert_to_hls_layers as to_hls
+from finn.transformation.fpgadataflow.create_dataflow_partition import CreateDataflowPartition
 from finn.transformation.fpgadataflow.prepare_cppsim import PrepareCppSim
 from finn.transformation.fpgadataflow.compile_cppsim import CompileCppSim
 from finn.transformation.fpgadataflow.set_exec_mode import SetExecMode
@@ -129,30 +129,34 @@ def verify_step(model, step_name):
     print("Running verification for: {} ...".format(step_name), end="", flush=True)
 
     if step_name=="brevitas_export":
-        quartznet_torch = stt.quant_quartznet_perchannelscaling_4b(export_mode=True)
+        #quartznet_torch = stt.quant_quartznet_perchannelscaling_4b(export_mode=True)
         iname = model.graph.input[0].name
         oname = model.graph.output[0].name
-        inp_val = np.load("/workspace/results/librispeech_data/input_sample_0.npy")
+        inp_val = np.load(build_dir+"/librispeech_data/input_sample_0.npy")
+        #inp_val = np.reshape(inp_val, (inp_val.shape[0], inp_val.shape[1], inp_val.shape[2]))
         input_dict = {iname: inp_val}
         # Execute FINN-base simulation
         output_dict = oxe.execute_onnx(model, input_dict)
         produced = output_dict[oname]
+        produced = np.reshape(produced, np.shape(produced)+(1,))
         # Save QuartzNet export output, which will be used as reference for other transformations
-        np.save("/workspace/results/librispeech_data/quartznet_export_output.npy")
-        # Execute Pytorch/Brevitas simulation
-        inp_val_torch = torch.from_numpy(inp_val).float()
-        # Do forward pass and compare output
-        expected = quartznet_torch.forward(inp_val_torch).detach().numpy()
+        np.save(build_dir+"/librispeech_data/quartznet_export_output.npy", produced)
+        ## Execute Pytorch/Brevitas simulation
+        #inp_val_torch = torch.from_numpy(inp_val).float()
+        ## Do forward pass and compare output
+        expected = np.load(build_dir+"/librispeech_data/output_sample_0.npy")
+        #expected = quartznet_torch.forward(inp_val_torch).detach().numpy()
     else:
         iname = model.graph.input[0].name
         oname = model.graph.output[0].name
-        inp_val = np.load("/workspace/results/librispeech_data/input_sample_0.npy")
+        inp_val = np.load(build_dir+"/librispeech_data/input_sample_0.npy")
+        inp_val = np.reshape(inp_val, np.shape(inp_val)+(1,)) # make 4D tensor
         input_dict = {iname: inp_val}
         # Execute FINN simulation
         output_dict = oxe.execute_onnx(model, input_dict)
         produced = output_dict[oname]
         # Compare against golden output (QuartzNet exported model)
-        expected = np.load("/workspace/results/librispeech_data/quartznet_export_output.npy")
+        expected = np.load(build_dir+"/librispeech_data/quartznet_export_output.npy")
 
     res = np.isclose(expected, produced, atol=1e-3).all() # basically the same as np.array_equal(expected, produced) for integer outputs
     res_to_str = {True: "SUCCESS", False: "FAIL"}
@@ -160,19 +164,23 @@ def verify_step(model, step_name):
     print(res_str)
 
 
-def test_end2end_quartznet_brevitas_export(verify=False):
-    finn_onnx = build_dir+"/end2end_quartznet_export_dev.onnx"
-    quartznet_torch = stt.quant_quartznet_perchannelscaling_4b(export_mode=True)
-    ishape = (1, 64, 256)
-    bo.export_finn_onnx(quartznet_torch, ishape, finn_onnx)
-    model = ModelWrapper(finn_onnx)
-    model = model.transform(InferShapes())
-    model = model.transform(FoldConstants())
-    model = model.transform(RemoveStaticGraphInputs())
+def test_end2end_quartznet_brevitas_export():
+    model = load_test_checkpoint_or_skip(build_dir + "/end2end_quartznet_export_dev.onnx")
+    verify_step(model, "brevitas_export")
 
-    model.save(finn_onnx)
-    if verify:
-        verify_step(model, "brevitas_export")
+#def test_end2end_quartznet_brevitas_export(verify=False):
+#    finn_onnx = build_dir+"/end2end_quartznet_export_dev.onnx"
+#    quartznet_torch = stt.quant_quartznet_perchannelscaling_4b(export_mode=True)
+#    ishape = (1, 64, 256)
+#    bo.export_finn_onnx(quartznet_torch, ishape, finn_onnx)
+#    model = ModelWrapper(finn_onnx)
+#    model = model.transform(InferShapes())
+#    model = model.transform(FoldConstants())
+#    model = model.transform(RemoveStaticGraphInputs())
+#
+#    model.save(finn_onnx)
+#    if verify:
+#        verify_step(model, "brevitas_export")
 
 
 def test_end2end_quartznet_tidy_and_change_shape_tensors(verify=False):
@@ -486,7 +494,7 @@ def test_end2end_quartznet_set_fifo_depths():
         if n.op_type=="StreamingDataflowPartition":
             path_to_partition = get_by_name(n.attribute, "model", "name").s.decode('utf-8')
             model_partition = ModelWrapper(path_to_partition)
-            # TODO: add Vivado ram style after inspecting resource utilization
+            # TODO: add Vivado ram style after inspecting resource utilization --> probably LUTs (from back-on-the-envelope resource estimation calculations)
             model_partition = model_partition.transform(InsertAndSetFIFODepths(test_fpga_part, target_clk_ns))
             model_partition.save(path_to_partition)
 
@@ -635,28 +643,30 @@ def test_end2end_quartznet_ooc(verify=False):
 
 
 def test_all():
-    print("Brevitas export")
-    test_end2end_quartznet_brevitas_export(verify=True)
-    print("Tidy and change shape tensors")
-    test_end2end_quartznet_tidy_and_change_shape_tensors(verify=True)
-    print("Streamline")
-    test_end2end_quartznet_streamline(verify=True)
-    print("Lowering")
-    test_end2end_quartznet_lowering(verify=True)
-    print("Repartition")
-    test_end2end_quartznet_repartition(verify=True)
-    print("Convert to HLS layers")
-    test_end2end_quartznet_convert_to_hls_layers()
+    #print("Brevitas export")
+    #test_end2end_quartznet_brevitas_export()
+    #print("Tidy and change shape tensors")
+    #test_end2end_quartznet_tidy_and_change_shape_tensors(verify=True)
+    #print("Streamline")
+    #test_end2end_quartznet_streamline(verify=True)
+    #print("Lowering")
+    #test_end2end_quartznet_lowering(verify=True)
+    #print("Repartition")
+    #test_end2end_quartznet_repartition(verify=True)
+    #print("Convert to HLS layers")
+    #test_end2end_quartznet_convert_to_hls_layers()
     print("Create dataflow partition")
     test_end2end_create_dataflow_partition()
     print("Folding")
     test_end2end_quartznet_folding()
+
     print("CPPsim")
     test_end2end_quartznet_cppsim(verify=True)
     print("Generate estimate reports")
     test_end2end_quartznet_generate_estimate_reports()
-    print("Generate RTL and HLS synthesis")
-    test_end2end_quartznet_gen_hls_ip()
+    #print("Generate RTL and HLS synthesis")
+    #test_end2end_quartznet_gen_hls_ip()
+
     #print("Set FIFO depths")
     #test_end2end_quartznet_set_fifo_depths()
     #print("Create stitched IP")
