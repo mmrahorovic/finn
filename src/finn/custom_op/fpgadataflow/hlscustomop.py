@@ -260,7 +260,7 @@ class HLSCustomOp(CustomOp):
         {op_<optype> : <count>, param_<paramtype>: <count>}."""
         return {}
 
-    def code_generation_ipgen(self, model, fpgapart, clk):
+    def code_generation_ipgen(self, model, fpgapart, clk, flow="syn"):
         """Generates c++ code and tcl script for ip generation."""
         node = self.onnx_node
 
@@ -294,6 +294,7 @@ class HLSCustomOp(CustomOp):
         self.code_gen_dict["$TOPFXN$"] = [node.name]
         self.code_gen_dict["$CLKPERIOD$"] = [str(clk)]
         self.code_gen_dict["$EXTRA_DIRECTIVES$"] = self.ipgen_extra_directives()
+        self.code_gen_dict["$FLOW$"] = [flow]
 
         template = self.ipgentcl_template
 

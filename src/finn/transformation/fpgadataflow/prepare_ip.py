@@ -34,7 +34,7 @@ from finn.util.fpgadataflow import is_fpgadataflow_node
 import warnings
 
 
-def _codegen_single_node(node, model, fpgapart, clk):
+def _codegen_single_node(node, model, fpgapart, clk, flow):
     """Calls C++ code generation for one node. Resulting code can be used
     to generate a Vivado IP block for the node."""
 
@@ -51,7 +51,7 @@ def _codegen_single_node(node, model, fpgapart, clk):
             )
             inst.set_nodeattr("code_gen_dir_ipgen", code_gen_dir)
             # ensure that there is generated code inside the dir
-            inst.code_generation_ipgen(model, fpgapart, clk)
+            inst.code_generation_ipgen(model, fpgapart, clk, flow)
         else:
             warnings.warn("Using pre-existing code for %s" % node.name)
     except KeyError:
@@ -76,13 +76,14 @@ class PrepareIP(Transformation):
     that contains generated C++ code that can be used to generate a Vivado IP block.
     The subsequent transformation is HLSSynthIP"""
 
-    def __init__(self, fpgapart, clk):
+    def __init__(self, fpgapart, clk, flow="syn"):
         super().__init__()
         self.fpgapart = fpgapart
         self.clk = clk
+        self.flow = flow
 
     def apply(self, model):
         for node in model.graph.node:
             if is_fpgadataflow_node(node) is True:
-                _codegen_single_node(node, model, self.fpgapart, self.clk)
+                _codegen_single_node(node, model, self.fpgapart, self.clk, self.flow)
         return (model, False)

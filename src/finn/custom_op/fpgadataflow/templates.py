@@ -106,7 +106,7 @@ $EXTRA_DIRECTIVES$
 
 create_clock -period $config_clkperiod -name default
 csynth_design
-export_design -format ip_catalog
+export_design -flow $FLOW$ -format ip_catalog
 exit 0
 """
 

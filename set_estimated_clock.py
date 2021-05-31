@@ -10,6 +10,8 @@ def set_estimated_clock(path):
         if is_fpgadataflow_node(n) is True:
             inst = registry.getCustomOp(n)
             code_gen_dir = inst.get_nodeattr("code_gen_dir_ipgen")
+            if code_gen_dir=="":
+                continue
             xmlfile = "{}/project_{}/sol1/syn/report/{}_csynth.xml".format(code_gen_dir, n.name, n.name)
             if os.path.isfile(xmlfile):
                 tree = ET.parse(xmlfile)
@@ -40,4 +42,6 @@ def set_estimated_clock(path):
             modified = True
 
     if modified:
-        model.save(path)
+        #model.save(path)
+        new_path = path.replace("hlssynth.onnx", "hlssynth_annotated.onnx")
+        model.save(new_path)

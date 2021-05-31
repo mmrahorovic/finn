@@ -298,7 +298,7 @@ def test_fpgadataflow_fclayer_rtlsim(mem_mode, idt, wdt, act, nf, sf, mw, mh):
     # works for parametrized tests...
     model = model.transform(SetExecMode("rtlsim"))
     model = model.transform(GiveUniqueNodeNames())
-    model = model.transform(PrepareIP("xc7z020clg400-1", 5))
+    model = model.transform(PrepareIP("xc7z020clg400-1", 5, "impl"))
     model = model.transform(HLSSynthIP())
     model = model.transform(PrepareRTLSim())
     y_produced = oxe.execute_onnx(model, input_dict)["outp"]
