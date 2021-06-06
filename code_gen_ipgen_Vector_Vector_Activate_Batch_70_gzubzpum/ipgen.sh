@@ -1,0 +1,4 @@
+#!/bin/bash 
+cd /workspace/results/code_gen_ipgen_Vector_Vector_Activate_Batch_70_gzubzpum
+vivado_hls /workspace/results/code_gen_ipgen_Vector_Vector_Activate_Batch_70_gzubzpum/hls_syn_Vector_Vector_Activate_Batch_70.tcl
+cd /shares/bulk/mmrahorovic/repositories/finn/tests/end2end

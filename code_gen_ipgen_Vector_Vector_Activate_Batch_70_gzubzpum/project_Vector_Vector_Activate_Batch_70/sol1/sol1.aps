@@ -1,0 +1,24 @@
+<AutoPilot:solution xmlns:AutoPilot="com.autoesl.autopilot.solution">
+    <name>
+        <value string="sol1"/>
+    </name>
+    <project>
+        <value string="project_Vector_Vector_Activate_Batch_70"/>
+    </project>
+    <targetInfo>
+        <TargetInfo value="xcu250:-figd2104:-2L-e"/>
+    </targetInfo>
+    <libraryList>
+        <library value="xilinx/virtexuplus/virtexuplus" name="DefaultPlatform"/>
+        <library value="xilinx/virtexuplus/virtexuplus_fpv7" name="DefaultPlatform"/>
+    </libraryList>
+    <config>
+        <config_compile disable_unroll_code_size_check="1" ignore_long_run_time="1"/>
+        <config_interface m_axi_addr64="1"/>
+        <config_rtl module_auto_prefix="1"/>
+    </config>
+    <clockList>
+        <clock name="default" period="1" default="false"/>
+    </clockList>
+</AutoPilot:solution>
+
