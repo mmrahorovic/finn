@@ -62,7 +62,7 @@ def test_brevitas_quartznet_onnx_export_and_exec():
     oname = model.graph.output[0].name
     #np.random.seed(42)
     #rand_inp = gen_finn_dt_tensor(idt, ishape)
-    rand_inp = np.load("/workspace/results/librispeech_data/input_sample_0.npy") # random input, but will generate some words for output instead of complete garbage (i.e. all 28's)
+    rand_inp = np.load("/workspace/results/librispeech_data/input_sample_float_0.npy") # random input, but will generate some words for output instead of complete garbage (i.e. all 28's)
     # run using FINN-based execution
     input_dict = {iname: rand_inp}
     output_dict = oxe.execute_onnx(model, input_dict)
