@@ -122,7 +122,7 @@ mem_mode = "decoupled"
 test_board = "U250"
 test_platform = alveo_default_platform[test_board]
 test_fpga_part = alveo_part_map[test_board]
-target_clk_ns = 1
+target_clk_ns = 5
 
 
 def verify_step(model, step_name):
@@ -132,7 +132,7 @@ def verify_step(model, step_name):
         #quartznet_torch = stt.quant_quartznet_perchannelscaling_4b(export_mode=True)
         iname = model.graph.input[0].name
         oname = model.graph.output[0].name
-        inp_val = np.load(build_dir+"/librispeech_data/input_sample_0.npy")
+        inp_val = np.load(build_dir+"/librispeech_data/input_sample_float_0.npy")
         #inp_val = np.reshape(inp_val, (inp_val.shape[0], inp_val.shape[1], inp_val.shape[2]))
         input_dict = {iname: inp_val}
         # Execute FINN-base simulation
@@ -144,17 +144,22 @@ def verify_step(model, step_name):
         ## Execute Pytorch/Brevitas simulation
         #inp_val_torch = torch.from_numpy(inp_val).float()
         ## Do forward pass and compare output
-        expected = np.load(build_dir+"/librispeech_data/output_sample_0.npy")
+        expected = np.load(build_dir+"/librispeech_data/output_sample_float_0.npy")
         #expected = quartznet_torch.forward(inp_val_torch).detach().numpy()
     else:
         iname = model.graph.input[0].name
         oname = model.graph.output[0].name
-        inp_val = np.load(build_dir+"/librispeech_data/input_sample_0.npy")
+        inp_val = np.load(build_dir+"/librispeech_data/input_sample_float_0.npy")
         inp_val = np.reshape(inp_val, np.shape(inp_val)+(1,)) # make 4D tensor
         input_dict = {iname: inp_val}
+        # Change tensor annotation to FLOAT for simulation (must be kept INT otherwise InferDataTypes will annotate all tensors as FLOAT)
+        first_conv_out = model.graph.node[0].output[0]
+        for t in [iname, first_conv_out]:
+            model.set_tensor_datatype(t, DataType.FLOAT32)
         # Execute FINN simulation
         output_dict = oxe.execute_onnx(model, input_dict)
         produced = output_dict[oname]
+        np.save(build_dir+"/librispeech_data/quartznet_"+step_name+".npy", produced)
         # Compare against golden output (QuartzNet exported model)
         expected = np.load(build_dir+"/librispeech_data/quartznet_export_output.npy")
 
@@ -246,8 +251,7 @@ def test_end2end_quartznet_streamline(verify=False):
 
 def test_end2end_quartznet_lowering(verify=False):
     model = load_test_checkpoint_or_skip(build_dir+"/end2end_quartznet_streamline.onnx")
-    partitionings = {0: range(0, 3),
-                    1: range(3, 75),
+    partitionings = {1: range(2, 75),
                     2: range(75, 147),
                     3: range(147, 219),
                     4: range(219, 291),
@@ -256,37 +260,37 @@ def test_end2end_quartznet_lowering(verify=False):
     model = model.transform(PartitionFromDict(partitionings, build_dir+"/partitioning_lowering"))
 
     for n in model.graph.node:
-        path_to_partition = get_by_name(n.attribute, "model", "name").s.decode('utf-8')
-        model_partition = ModelWrapper(path_to_partition)
-        # Lowering
-        model_partition = model_partition.transform(LowerConvsToMatMul())
-        # Absorb transpose node
-        model_partition = model_partition.transform(AbsorbTransposeIntoMultiThreshold())
-        # Reorder remaining transpose nodes
-        model_partition = model_partition.transform(MoveTransposePastMultiThreshold())
-        model_partition = model_partition.transform(MoveTransposePastJoinAdd())
-        model_partition = model_partition.transform(MoveTransposeBeforeFork())
+        if n.op_type=="GenericPartition":
+            path_to_partition = get_by_name(n.attribute, "model", "name").s.decode('utf-8')
+            model_partition = ModelWrapper(path_to_partition)
+            # Lowering
+            model_partition = model_partition.transform(LowerConvsToMatMul())
+            # Absorb transpose node
+            model_partition = model_partition.transform(AbsorbTransposeIntoMultiThreshold())
+            # Reorder remaining transpose nodes
+            model_partition = model_partition.transform(MoveTransposePastMultiThreshold())
+            model_partition = model_partition.transform(MoveTransposePastJoinAdd())
+            model_partition = model_partition.transform(MoveTransposeBeforeFork())
 
-        model_partition.save(path_to_partition)
+            model_partition.save(path_to_partition)
 
     model.save(build_dir+"/end2end_quartznet_lowered.onnx")
 
 def test_end2end_quartznet_repartition(verify=False):
     model = load_test_checkpoint_or_skip(build_dir+"/end2end_quartznet_lowered.onnx")
-    partitionings = [{0: range(0,4), 1: range(4, 34), 2: range(34, 63), 3: range(63, 92)},
-                     {4: range(4, 33), 5: range(33, 62), 6: range(62, 91)},
+    partitionings = [{0: range(0,3), 1: range(3, 33), 2: range(33, 62), 3: range(62, 91), 4: range(91, 120), 5: range(120, 149), 6: range(149, 178)},
                      {7: range(7, 36), 8: range(36, 65), 9: range(65, 94)},
                      {10: range(10, 39), 11: range(39, 68), 12: range(68, 97)},
                      {13: range(13, 42), 14: range(42, 71), 15: range(71, 100)},
                      {16: range(16, 25)}
                     ]
 
-    nodes = [n for n in model.graph.node]
+    nodes = [n for n in model.graph.node if n.op_type=="GenericPartition"]
     for ind, n in enumerate(nodes):
         if ind == 0:
-            node_ind_to_unfold = [ind, ind+1] # unfold current and next node
+            node_ind_to_unfold = [2+ind, 2+ind+1] # unfold current and next node
         else:
-            node_ind_to_unfold = [3*ind+2] # (+1 for initial nodes, +3 partitions, +1 for Transpose node)
+            node_ind_to_unfold = [3*ind+5] # (+1 for initial partition, +1 transpose node, +3 partitions)
 
         model = model.transform(ExtendPartition(node_ind_to_unfold))
         model = model.transform(AbsorbTransposeIntoMultiThreshold())
@@ -301,8 +305,6 @@ def test_end2end_quartznet_repartition(verify=False):
             model = model.transform(PartitionFromDict(partitionings[3], build_dir+"/partitioning_repartition"))
         if ind==4:
             model = model.transform(PartitionFromDict(partitionings[4], build_dir+"/partitioning_repartition"))
-        if ind==5:
-            model = model.transform(PartitionFromDict(partitionings[5], build_dir+"/partitioning_repartition"))
             break
 
     model = model.transform(GiveUniqueNodeNames())
@@ -312,28 +314,28 @@ def test_end2end_quartznet_convert_to_hls_layers():
     model = load_test_checkpoint_or_skip(build_dir+"/end2end_quartznet_lowered_partitioned.onnx")
 
     #partition_dir = build_dir+"/partitioning_hls"
-    partition_id = 0
-    for n in model.graph.node:
-        if n.op_type=="GenericPartition":
-            #inst = GetCustomOp(n)
-            prefix = "pt_"+str(partition_id)+"_"
+    partition_id = 1
+    nodes = [n for n in model.graph.node if (n.op_type=="GenericPartition" and n.name!="GenericPartition_0")]
+    for n in nodes:
+        #inst = GetCustomOp(n)
+        prefix = "pt_"+str(partition_id)+"_"
 
-            path_to_partition = get_by_name(n.attribute, "model", "name").s.decode('utf-8')
-            model_partition = ModelWrapper(path_to_partition)
+        path_to_partition = get_by_name(n.attribute, "model", "name").s.decode('utf-8')
+        model_partition = ModelWrapper(path_to_partition)
 
-            model_partition = model_partition.transform(to_hls.InferConvInpGen(), make_deepcopy=False)
-            model_partition = model_partition.transform(to_hls.InferVVAU(), make_deepcopy=False)
-            model_partition = model_partition.transform(to_hls.InferQuantizedStreamingFCLayer(mem_mode), make_deepcopy=False)
-            model_partition = model_partition.transform(to_hls.InferThresholdingLayer(), make_deepcopy=False)
-            model_partition = model_partition.transform(to_hls.InferAddStreamsLayer(), make_deepcopy=False)
-            model_partition = model_partition.transform(to_hls.InferDuplicateStreamsLayer(), make_deepcopy=False)
+        model_partition = model_partition.transform(to_hls.InferConvInpGen(), make_deepcopy=False)
+        model_partition = model_partition.transform(to_hls.InferVVAU(), make_deepcopy=False)
+        model_partition = model_partition.transform(to_hls.InferQuantizedStreamingFCLayer(mem_mode), make_deepcopy=False)
+        model_partition = model_partition.transform(to_hls.InferThresholdingLayer(), make_deepcopy=False)
+        model_partition = model_partition.transform(to_hls.InferAddStreamsLayer(), make_deepcopy=False)
+        model_partition = model_partition.transform(to_hls.InferDuplicateStreamsLayer(), make_deepcopy=False)
 
-            #pathlib.Path(self.partition_dir).mkdir(parents=True, exist_ok=True)
-            #partition_path = partition_dir+"/partition_"+str(partition_id)+".onnx"
-            model_partition.save(path_to_partition)
-            #inst.set_nodeattr("model", partition_path)
+        #pathlib.Path(self.partition_dir).mkdir(parents=True, exist_ok=True)
+        #partition_path = partition_dir+"/partition_"+str(partition_id)+".onnx"
+        model_partition.save(path_to_partition)
+        #inst.set_nodeattr("model", partition_path)
 
-            partition_id+=1
+        partition_id+=1
 
     model.save(build_dir+"/end2end_quartznet_hls_layers.onnx")
 
@@ -369,6 +371,35 @@ def test_end2end_quartznet_folding(verify=False):
                     inst.set_nodeattr("ram_style", "distributed")
                 elif n_par.op_type=="Vector_Vector_Activate_Batch":
                     inst.set_nodeattr("resType", "dsp")
+                    # Vivado HLS runs out of memory for VVAU nodes of 7th partition and onwards. Solution for now: increase PE to lower load/store instructions.
+                    # TODO: find a better solution that does not require wasting resources.
+                    name = n_par.name
+                    node_idx = int(name.split("_")[-1])
+                    ch = inst.get_nodeattr("Channels")
+                    k = inst.get_nodeattr("Kernel")[0]
+                    pe = inst.get_nodeattr("PE")
+                    load_stores = ch*k/pe
+                    if node_idx>30 and node_idx<=44:
+                        if load_stores > 13500:
+                            new_pe = pe*2
+                            if load_stores > 27000:
+                                new_pe = pe*4
+                            inst.set_nodeattr("PE", new_pe)
+                            print("WARNING: load_stores exceeds 13500 ({}) for node {}, increasing PE from {} to {}!".format(load_stores, n_par.name, pe, new_pe))
+                    if node_idx>44:
+                        if load_stores > 8000:
+                            new_pe = pe*2
+                            if load_stores > 16000:
+                                new_pe = pe*4
+                            if load_stores > 33000:
+                                new_pe = pe*8
+                            inst.set_nodeattr("PE", new_pe)
+                            print("WARNING: load_stores exceeds 8000 ({}) for node {}, increasing PE from {} to {}!".format(load_stores, n_par.name, pe, new_pe))
+                    else: # node_idx<=30
+                        if load_stores > 32000:
+                            new_pe = pe*2
+                            inst.set_nodeattr("PE", new_pe)
+                            print("WARNING: load_stores exceeds 16000 ({}) for node {}, increasing PE from {} to {}!".format(load_stores, n_par.name, pe, new_pe))
                 elif n_par.op_type=="StreamingFCLayer_Batch":
                     inst.set_nodeattr("resType", "dsp")
                     inst.set_nodeattr("ram_style", "ultra")
@@ -413,7 +444,8 @@ def test_end2end_quartznet_cppsim(verify=False):
 
 def test_end2end_quartznet_generate_estimate_reports():
     # See https://github.com/Xilinx/finn/blob/dev/src/finn/builder/build_dataflow_steps.py
-    model = load_test_checkpoint_or_skip(build_dir + "/end2end_quartznet_cppsim.onnx")
+    #model = load_test_checkpoint_or_skip(build_dir + "/end2end_quartznet_cppsim.onnx")
+    model = load_test_checkpoint_or_skip(build_dir + "/end2end_quartznet_folded.onnx")
     report_dir = build_dir + "/report"
     os.makedirs(report_dir, exist_ok=True)
 
@@ -455,7 +487,8 @@ def test_end2end_quartznet_generate_estimate_reports():
 
 
 def test_end2end_quartznet_gen_hls_ip():
-    model = load_test_checkpoint_or_skip(build_dir+"/end2end_quartznet_cppsim.onnx")
+    #model = load_test_checkpoint_or_skip(build_dir+"/end2end_quartznet_cppsim.onnx")
+    model = load_test_checkpoint_or_skip(build_dir+"/end2end_quartznet_folded.onnx")
 
     start = time.time()
     for n in model.graph.node:
@@ -466,6 +499,7 @@ def test_end2end_quartznet_gen_hls_ip():
             model_partition = model_partition.transform(PrepareIP(test_fpga_part, target_clk_ns))
             model_partition.save(path_to_partition)
             model_partition = model_partition.transform(HLSSynthIP())
+            model_partition.save(path_to_partition)
             model_partition = model_partition.transform(ReplaceVerilogRelPaths())
             model_partition = model_partition.transform(AnnotateResources("hls"))
             model_partition.save(path_to_partition)
@@ -655,17 +689,17 @@ def test_all():
     #test_end2end_quartznet_repartition(verify=True)
     #print("Convert to HLS layers")
     #test_end2end_quartznet_convert_to_hls_layers()
-    print("Create dataflow partition")
-    test_end2end_create_dataflow_partition()
+    #print("Create dataflow partition")
+    #test_end2end_create_dataflow_partition()
+
     print("Folding")
     test_end2end_quartznet_folding()
-
-    print("CPPsim")
-    test_end2end_quartznet_cppsim(verify=True)
+    #print("CPPsim")
+    #test_end2end_quartznet_cppsim(verify=True)
     print("Generate estimate reports")
     test_end2end_quartznet_generate_estimate_reports()
-    #print("Generate RTL and HLS synthesis")
-    #test_end2end_quartznet_gen_hls_ip()
+    print("Generate RTL and HLS synthesis")
+    test_end2end_quartznet_gen_hls_ip()
 
     #print("Set FIFO depths")
     #test_end2end_quartznet_set_fifo_depths()
