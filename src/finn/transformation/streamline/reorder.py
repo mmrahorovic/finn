@@ -1116,6 +1116,80 @@ class MoveTransposePastMultiThreshold(Transformation):
         return (model, graph_modified)
 
 
+class MoveTransposePastMultiThreshold(Transformation):
+    """Moves Transpose nodes past MultiThreshold nodes on linear segments
+    of the graph."""
+
+    def apply(self, model):
+        graph = model.graph
+        graph_modified = False
+        for n in graph.node:
+            if n.op_type == "Transpose" and not model.is_fork_node(n):
+                consumer = model.find_consumer(n.output[0])
+                if (
+                    consumer is not None
+                    and consumer.op_type == "MultiThreshold"
+                    and not model.is_fork_node(consumer)
+                ):
+                    perm = get_by_name(n.attribute, "perm", "name")
+                    perm = oh.get_attribute_value(perm)
+                    nhwc_to_nchw = [0, 3, 1, 2]
+                    nchw_to_nhwc = [0, 2, 3, 1]
+                    mt_inst = getCustomOp(consumer)
+                    mt_data_layout = mt_inst.get_nodeattr("data_layout")
+
+                    # Set new attribute
+                    if mt_data_layout == "NCHW":
+                        if perm == nhwc_to_nchw:
+                            # Transpose(NHWC) -> NCHW. As we move the transpose node
+                            # after the multithreshold node, the input tensor
+                            # will be in NHWC format
+                            new_data_layout = "NHWC"
+                            new_tensor_data_layout = DataLayout.NHWC
+                            graph_modified = True
+                        else:
+                            continue
+
+                    elif mt_data_layout == "NHWC":
+                        if perm == nchw_to_nhwc:
+                            # Transpose(NCHW) -> NHWC. As we move the transpose node
+                            # after the multithreshold node, the input tensor
+                            # will be in NCHW format
+                            new_data_layout = "NCHW"
+                            new_tensor_data_layout = DataLayout.NCHW
+                            graph_modified = True
+                        else:
+                            continue
+
+                    # Update the node attribute data_layout
+                    mt_inst.set_nodeattr("data_layout", new_data_layout)
+
+                    # Now we will rewire the nodes accordingly
+                    transpose_in = n.input[0]
+                    transpose_out = n.output[0]
+                    multithreshold_out = consumer.output[0]
+                    transpose_in_shape = model.get_tensor_shape(transpose_in)
+
+                    # Move the multithreshold node in front of the transpose node
+                    consumer.input[0] = transpose_in
+                    consumer.output[0] = transpose_out
+                    # Change the shape of transpose_out tensor to match the shape
+                    # of the input tensor
+                    model.set_tensor_shape(transpose_out, transpose_in_shape)
+                    model.set_tensor_layout(transpose_out, new_tensor_data_layout)
+                    model.set_tensor_layout(transpose_in, new_tensor_data_layout)
+
+                    # Ensure the right tensors are connected to the Transpose node
+                    n.input[0] = consumer.output[0]
+                    n.output[0] = multithreshold_out
+
+        # We must ensure the graph is sorted, because we reordered the nodes
+        if graph_modified:
+            model = model.transform(SortGraph(), make_deepcopy=False, cleanup=False)
+
+        return (model, graph_modified)
+
+
 class MoveIdenticalOpPastJoinOp(Transformation):
     """
     Move identical operations on different branches past the common join node.
@@ -1188,3 +1262,53 @@ class MoveIdenticalOpPastJoinOp(Transformation):
 class MoveTransposePastJoinAdd(MoveIdenticalOpPastJoinOp):
     def __init__(self):
         super().__init__(["Transpose"], ["Add"])
+
+
+class MoveIdenticalOpBeforeFork(Transformation):
+    """Move identical operations on different branches in front of the fork.
+    This transformation assumes that the identical operations only change
+    the data layout. Specifically, this transformation matches and transforms
+    the following patterns:
+    a -> b, c -> f(b), f(c)
+    a -> f(a) -> f(b), f(c)
+    where f(.) is currently only supporting 'Transpose',
+    and (a -> b, c) indicates the 'fork'
+    """
+
+    def __init__(self, identical_op_list):
+        super().__init__()
+        self.ops_to_move = identical_op_list
+
+    def move_node(self, model, n, cons0, cons1):
+        # Found! move one of the transpose nodes, remove the other one
+        transpose0_out = cons0.output[0]
+        transpose1_out = cons1.output[0]
+
+        # Find the consumer of one of the identical nodes
+        cons_transpose1 = model.find_consumer(transpose1_out)
+
+        # Connect the input of that consumer to the other identical node
+        cons_transpose1.input[0] = transpose0_out
+
+        model.graph.node.remove(cons1)
+
+    def apply(self, model):
+        graph = model.graph
+        graph_modified = False
+        for n in graph.node:
+            if model.is_fork_node(n):
+                consumers = model.find_consumers(n.output[0])
+                cons0 = consumers[0]
+                cons1 = consumers[1]
+
+                identical_op = cons0.op_type == cons1.op_type
+
+                if identical_op and cons0.op_type in self.ops_to_move:
+                    self.move_node(model, n, cons0, cons1)
+
+        return (model, graph_modified)
+
+
+class MoveTransposeBeforeFork(MoveIdenticalOpBeforeFork):
+    def __init__(self):
+        super().__init__(["Transpose"])
