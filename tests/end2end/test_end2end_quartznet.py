@@ -36,7 +36,7 @@ import numpy as np
 import finn.core.onnx_exec as oxe
 from finn.transformation.fold_constants import FoldConstants
 from finn.transformation.general import RemoveStaticGraphInputs
-from finn.transformation.general.infer_shapes import InferShapes
+from finn.transformation.infer_shapes import InferShapes
 import brevitas_examples.speech_to_text as stt
 
 from finn.custom_op.registry import getCustomOp
