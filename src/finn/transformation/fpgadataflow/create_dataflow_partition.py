@@ -80,15 +80,73 @@ class CreateDataflowPartition(Transformation):
                 for node_to_remove in non_df_nodes:
                     df_model.graph.node.remove(node_to_remove)
                 # identify the entry and exit points for the dataflow part
-                df_in = df_model.graph.node[0].input[0]
-                df_out = df_model.graph.node[-1].output[0]
-                df_in_vi = df_model.get_tensor_valueinfo(df_in)
-                df_out_vi = df_model.get_tensor_valueinfo(df_out)
+                df_in = []
+                df_out = []
+                for node in df_model.graph.node:
+                    for in_tensor in node.input:
+                        # check if producer has been removed = lies outside the partition
+                        has_initializer = in_tensor in [
+                            x.name for x in df_model.graph.initializer
+                        ]
+                        has_producer = df_model.find_producer(in_tensor) is not None
+                        if not has_initializer and not has_producer:
+                            # the same tensor could feed multiple nodes within the partition
+                            # (e.g. for residual connections), so we avoid duplicates
+                            if in_tensor not in df_in:
+                                df_in.append(in_tensor)
+                    for out_tensor in node.output:
+                        # check if tensor is top-level output
+                        # or has a consumer outside the partition
+                        if out_tensor in [x.name for x in model.graph.output]:
+                            if out_tensor not in df_out:
+                                df_out.append(out_tensor)
+                        else:
+                            for consumer in model.find_consumers(out_tensor):
+                                if consumer in non_df_nodes and out_tensor not in df_out:
+                                    df_out.append(out_tensor)
+
+                df_in_vi = list(map(lambda x: df_model.get_tensor_valueinfo(x), df_in))
+                df_out_vi = list(map(lambda x: df_model.get_tensor_valueinfo(x), df_out))
+
+                for x in df_model.graph.input:
+                    df_model.graph.input.remove(x)
+                for i in df_in_vi:
+                    df_model.graph.input.append(i)
+
+                for x in df_model.graph.output:
+                    df_model.graph.output.remove(x)
+                for o in df_out_vi:
+                    df_model.graph.output.append(o)
+
+                # remove redundant input and output value_info entries
+                for i in df_in_vi:
+                    # the tensor can be both an input and value_info, so we also have to
+                    # ensure that the tensor is not a relevant value_info before removing
+                    if (
+                        i in df_model.graph.value_info
+                        and df_model.find_producer(i.name) is None
+                    ):
+                        df_model.graph.value_info.remove(i)
+
+                for o in df_out_vi:
+                    # the tensor can both an output and value_info, so we also have to
+                    # ensure that the tensor is not a relevant value_info before removing
+                    if (
+                        o in df_model.graph.value_info
+                        and df_model.find_consumers(o.name) is None
+                    ):
+                        df_model.graph.value_info.remove(o)
+
+                #df_in = df_model.graph.node[0].input[0]
+                #df_out = df_model.graph.node[-1].output[0]
+                #df_in_vi = df_model.get_tensor_valueinfo(df_in)
+                #df_out_vi = df_model.get_tensor_valueinfo(df_out)
                 # set df graph in/out to be df_in/df_out
-                df_model.graph.input.remove(df_model.graph.input[0])
-                df_model.graph.input.insert(0, df_in_vi)
-                df_model.graph.output.remove(df_model.graph.output[0])
-                df_model.graph.output.insert(0, df_out_vi)
+                #df_model.graph.input.remove(df_model.graph.input[0])
+                #df_model.graph.input.insert(0, df_in_vi)
+                #df_model.graph.output.remove(df_model.graph.output[0])
+                #df_model.graph.output.insert(0, df_out_vi)
+
                 # parse StreamingFCLayers looking for external weight memories
                 fc_extw_nodes = filter(
                     lambda x: x.op_type == "StreamingFCLayer_Batch"
@@ -100,11 +158,12 @@ class CreateDataflowPartition(Transformation):
                 fc_extw_nodes = list(fc_extw_nodes)
                 extra_df_inputs = []
 
+                num_of_global_inputs = len(df_model.graph.input)
                 for i in range(len(fc_extw_nodes)):
                     fc_weight_vi = df_model.get_tensor_valueinfo(
                         fc_extw_nodes[i].input[1]
                     )
-                    df_model.graph.input.insert(i + 1, fc_weight_vi)
+                    df_model.graph.input.insert(i + num_of_global_inputs, fc_weight_vi)
                     extra_df_inputs.append(fc_extw_nodes[i].input[1])
 
                 # save model
@@ -123,10 +182,12 @@ class CreateDataflowPartition(Transformation):
                 slr = inst.get_nodeattr("slr")
                 for node in df_nodes[1:]:
                     inst = getCustomOp(node)
+                    print("{}\t{}".format(node.name, inst.get_nodeattr("slr")))
                     assert slr == inst.get_nodeattr(
                         "slr"
                     ), """all nodes with
                 same partition_id must have the same slr id"""
+                print("{}-------".format(target_partition_id))
 
                 # check that there is only one non-null mem_port per partition
                 nmemports = 0
@@ -144,8 +205,8 @@ class CreateDataflowPartition(Transformation):
                 # create StreamingDataflow node with df_in/df_out io
                 df_node = helper.make_node(
                     "StreamingDataflowPartition",
-                    [df_in] + extra_df_inputs,
-                    [df_out],
+                    df_in + extra_df_inputs,
+                    df_out,
                     # use the model attribute to mark the df model
                     model=df_model_filename,
                     domain="finn.custom_op.general",
@@ -155,6 +216,9 @@ class CreateDataflowPartition(Transformation):
                 )
                 non_df_model.graph.node.insert(df_start_ind, df_node)
                 model = non_df_model
+
+                #if target_partition_id==4:
+                #    return (model, False)
                 target_partition_id += 1
 
         return (model, False)

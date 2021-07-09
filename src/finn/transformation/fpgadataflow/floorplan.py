@@ -135,13 +135,29 @@ class Floorplan(Transformation):
             node_inst.set_nodeattr("partition_id", partition_cnt)
             partition_cnt += 1
 
+        streamingfc_count = 0
         for node in non_dma_nodes:
+            #print(node.name)
             pre_node = model.find_producer(node.input[0])
             node_inst = getCustomOp(node)
+            if(
+                node.op_type == "StreamingFCLayer_Batch"
+                and node_inst.get_nodeattr("mem_mode") == "decoupled"
+                and node_inst.get_nodeattr("ram_style") == "ultra"
+                and node_inst.get_nodeattr("runtime_writeable_weights") == 1
+            ):
+                streamingfc_count+=1
+
             if pre_node not in non_dma_nodes:
                 # input node
                 node_inst.set_nodeattr("partition_id", partition_cnt)
                 partition_cnt += 1
+                continue
+            elif (streamingfc_count==2):
+                # too many streamingfc nodes, go to next partition
+                node_inst.set_nodeattr("partition_id", partition_cnt)
+                partition_cnt += 1
+                streamingfc_count=1
                 continue
             elif not (
                 node.op_type == "StreamingFCLayer_Batch"
@@ -153,17 +169,40 @@ class Floorplan(Transformation):
                 pre_nodes = [pre_node]
 
             node_slr = node_inst.get_nodeattr("slr")
-            for pre_node in pre_nodes:
+            for idx, pre_node in enumerate(pre_nodes):
                 pre_inst = getCustomOp(pre_node)
                 pre_slr = pre_inst.get_nodeattr("slr")
                 if node_slr == pre_slr:
                     partition_id = pre_inst.get_nodeattr("partition_id")
-                    node_inst.set_nodeattr("partition_id", partition_id)
+                    if len(pre_nodes)==2: # prevent loops in residual blocks
+                        second_producer_inst = getCustomOp(pre_nodes[1-idx])
+                        is_cyclic = partition_id < second_producer_inst.get_nodeattr("partition_id")
+                        same_slr = node_slr==second_producer_inst.get_nodeattr("slr")
+                        if is_cyclic and not same_slr:
+                            #print(node.name)
+                            # no matching, new partition
+                            node_inst.set_nodeattr("partition_id", partition_cnt)
+                            partition_cnt += 1
+                            streamingfc_count = 0
+                        else: # not cyclic
+                            if same_slr:
+                                # set it to largest partition_id
+                                partition_id_second_node = second_producer_inst.get_nodeattr("partition_id")
+                                if partition_id_second_node > partition_id:
+                                    node_inst.set_nodeattr("partition_id", partition_id_second_node)
+                                else:
+                                    node_inst.set_nodeattr("partition_id", partition_id)
+                            else:
+                                node_inst.set_nodeattr("partition_id", partition_id)
+                    else:
+                        node_inst.set_nodeattr("partition_id", partition_id)
                     break
             else:
                 # no matching, new partition
                 node_inst.set_nodeattr("partition_id", partition_cnt)
                 partition_cnt += 1
+                streamingfc_count=0
+
 
         # save the updated floorplan
         floorplan = model.analysis(floorplan_params)
