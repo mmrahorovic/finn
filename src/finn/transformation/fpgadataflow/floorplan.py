@@ -35,6 +35,26 @@ from finn.transformation.general import ApplyConfig
 import warnings
 import json
 
+def _get_nodes_by_partition_id(model, partition_id):
+    nodes_list = []
+    for n in model.graph.node:
+        p_id = get_by_name(n.attribute, "partition_id")
+        if p_id is None:
+            continue
+        elif p_id.i==partition_id:
+            nodes_list.append(n)
+    if nodes_list != []:
+        return nodes_list
+    else:
+        return None
+
+def _is_axi_node(node):
+    return (
+        node.op_type=="StreamingFCLayer_Batch"
+        and getCustomOp(node).get_nodeattr("mem_mode")=="decoupled"
+        and getCustomOp(node).get_nodeattr("ram_style")=="ultra"
+        and getCustomOp(node).get_nodeattr("runtime_writeable_weights")==1
+    )
 
 class Floorplan(Transformation):
     """Perform Floorplanning of the dataflow design:
@@ -135,29 +155,13 @@ class Floorplan(Transformation):
             node_inst.set_nodeattr("partition_id", partition_cnt)
             partition_cnt += 1
 
-        streamingfc_count = 0
         for node in non_dma_nodes:
-            #print(node.name)
             pre_node = model.find_producer(node.input[0])
             node_inst = getCustomOp(node)
-            if(
-                node.op_type == "StreamingFCLayer_Batch"
-                and node_inst.get_nodeattr("mem_mode") == "decoupled"
-                and node_inst.get_nodeattr("ram_style") == "ultra"
-                and node_inst.get_nodeattr("runtime_writeable_weights") == 1
-            ):
-                streamingfc_count+=1
-
             if pre_node not in non_dma_nodes:
                 # input node
                 node_inst.set_nodeattr("partition_id", partition_cnt)
                 partition_cnt += 1
-                continue
-            elif (streamingfc_count==2):
-                # too many streamingfc nodes, go to next partition
-                node_inst.set_nodeattr("partition_id", partition_cnt)
-                partition_cnt += 1
-                streamingfc_count=1
                 continue
             elif not (
                 node.op_type == "StreamingFCLayer_Batch"
@@ -174,7 +178,7 @@ class Floorplan(Transformation):
                 pre_slr = pre_inst.get_nodeattr("slr")
                 if node_slr == pre_slr:
                     partition_id = pre_inst.get_nodeattr("partition_id")
-                    if len(pre_nodes)==2: # prevent loops in residual blocks
+                    if len(pre_nodes)==2: # we have to prevent loops in residual blocks (AddStreams_Batch)
                         second_producer_inst = getCustomOp(pre_nodes[1-idx])
                         is_cyclic = partition_id < second_producer_inst.get_nodeattr("partition_id")
                         same_slr = node_slr==second_producer_inst.get_nodeattr("slr")
@@ -183,30 +187,40 @@ class Floorplan(Transformation):
                             # no matching, new partition
                             node_inst.set_nodeattr("partition_id", partition_cnt)
                             partition_cnt += 1
-                            streamingfc_count = 0
-                        else: # not cyclic
-                            if same_slr:
+                        else:
+                            if is_cyclic and same_slr:
                                 # set it to largest partition_id
                                 partition_id_second_node = second_producer_inst.get_nodeattr("partition_id")
-                                if partition_id_second_node > partition_id:
-                                    node_inst.set_nodeattr("partition_id", partition_id_second_node)
-                                else:
-                                    node_inst.set_nodeattr("partition_id", partition_id)
+                                #if partition_id_second_node > partition_id:
+                                node_inst.set_nodeattr("partition_id", partition_id_second_node)
+                        #        else:
+                        #            node_inst.set_nodeattr("partition_id", partition_id)
                             else:
                                 node_inst.set_nodeattr("partition_id", partition_id)
                     else:
-                        node_inst.set_nodeattr("partition_id", partition_id)
+                        if _is_axi_node(node):
+                            partition_id_nodes = _get_nodes_by_partition_id(model, partition_id)
+                            if partition_id_nodes is None:
+                                node_inst.set_nodeattr("partition_id", partition_id)
+                            else:
+                                has_axi_node = any([_is_axi_node(x) for x in partition_id_nodes])
+                                if has_axi_node:
+                                    # partition already contains 'axi_node', so create a new partition for the current node
+                                    node_inst.set_nodeattr("partition_id", partition_cnt)
+                                    partition_cnt += 1
+                                else:
+                                    node_inst.set_nodeattr("partition_id", partition_id)
+                        else:
+                            node_inst.set_nodeattr("partition_id", partition_id)
                     break
             else:
                 # no matching, new partition
                 node_inst.set_nodeattr("partition_id", partition_cnt)
                 partition_cnt += 1
-                streamingfc_count=0
-
 
         # save the updated floorplan
-        floorplan = model.analysis(floorplan_params)
-        with open(model.get_metadata_prop("floorplan_json"), "w") as f:
-            json.dump(floorplan, f, indent=4)
+        #floorplan = model.analysis(floorplan_params)
+        #with open(model.get_metadata_prop("floorplan_json"), "w") as f:
+        #    json.dump(floorplan, f, indent=4)
 
         return (model, False)
