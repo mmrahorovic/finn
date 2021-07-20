@@ -139,10 +139,10 @@ else
   DOCKER_INTERACTIVE="-it"
 fi
 
-if [ "$FINN_DOCKER_GPU" != 0 ];then
-  gecho "nvidia-docker detected, enabling GPUs"
-  DOCKER_EXTRA+="--gpus all"
-fi
+#if [ "$FINN_DOCKER_GPU" != 0 ];then
+#  gecho "nvidia-docker detected, enabling GPUs"
+#  DOCKER_EXTRA+="--gpus all"
+#fi
 
 VIVADO_HLS_LOCAL=$VIVADO_PATH
 VIVADO_IP_CACHE=$FINN_HOST_BUILD_DIR/vivado_ip_cache
@@ -179,6 +179,8 @@ DOCKER_EXEC+="--hostname $DOCKER_INST_NAME "
 DOCKER_EXEC+="-e SHELL=/bin/bash "
 DOCKER_EXEC+="-v $SCRIPTPATH:/workspace/finn "
 DOCKER_EXEC+="-v $FINN_HOST_BUILD_DIR:$FINN_HOST_BUILD_DIR "
+DOCKER_EXEC+="-v /home/mirza/Documents/Thesis/git_repos/forks/finn-hlslib:/workspace/finn-hlslib "
+DOCKER_EXEC+="-v /home/mirza/Documents/x2go_shared/quartznet_synthesis:/workspace/results "
 DOCKER_EXEC+="-v $FINN_SSH_KEY_DIR:/workspace/.ssh "
 DOCKER_EXEC+="-e FINN_BUILD_DIR=$FINN_HOST_BUILD_DIR "
 DOCKER_EXEC+="-e FINN_ROOT="/workspace/finn" "
