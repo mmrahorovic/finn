@@ -28,6 +28,8 @@
 
 import os
 import pytest
+import time
+import json
 
 import numpy as np
 
@@ -581,10 +583,10 @@ class TestEnd2End:
         cfg = get_build_env(kind, target_clk_ns)
         model = model.transform(cfg["build_fxn"])
         model = model.transform(AnnotateResources("synth"))
-        synth_dct = eval(model.get_metadata_prop("res_total_top_synth"))
-        for (k, v) in synth_dct.items():
-            update_dashboard_data(topology, wbits, abits, k, v)
-        update_dashboard_data(topology, wbits, abits, "board", cfg["board"])
+        #synth_dct = eval(model.get_metadata_prop("res_total_top_synth"))
+        #for (k, v) in synth_dct.items():
+        #    update_dashboard_data(topology, wbits, abits, k, v)
+        #update_dashboard_data(topology, wbits, abits, "board", cfg["board"])
         model.save(get_checkpoint_name(topology, wbits, abits, "build_" + kind))
 
     @pytest.mark.parametrize("kind", ["zynq", "alveo"])
@@ -692,3 +694,40 @@ class TestEnd2End:
             upload_to_end2end_dashboard(dashboard_data)
         else:
             pytest.skip("No data to upload to dashboard")
+
+
+def test_all():
+    wbits=1
+    abits=1
+    topology="cnv"
+    kind = "alveo"
+
+    test_e2e = TestEnd2End()
+    #print("Export")
+    #test_e2e.test_export(topology, wbits, abits)
+    #print("Tidy")
+    #test_e2e.test_import_and_tidy(topology, wbits, abits)
+    #print("Add pre and post proc")
+    #test_e2e.test_add_pre_and_postproc(topology, wbits, abits)
+    #print("Streamline")
+    #test_e2e.test_streamline(topology, wbits, abits)
+    #print("Convert to HLS")
+    #test_e2e.test_convert_to_hls_layers(topology, wbits, abits)
+    #print("Create SDF")
+    #test_e2e.test_create_dataflow_partition(topology, wbits, abits)
+    #print("Fold")
+    #test_e2e.test_fold(topology, wbits, abits)
+    #print("IPgen")
+    #test_e2e.test_ipgen(topology, wbits, abits, kind)
+    #print("Insert FIFOs")
+    #test_e2e.test_set_fifo_depths(topology, wbits, abits, kind)
+    print("Build")
+    start = time.time()
+    test_e2e.test_build(topology, wbits, abits, kind)
+    end = time.time()
+    elapsed_time = end-start
+    print("Elapsed time: {}".format(elapsed_time))
+    f = open(build_dir + "/build_time.txt", "w+")
+    f.write("Execution time in seconds: " + str(elapsed_time))
+    f.close()
+
