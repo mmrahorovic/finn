@@ -35,6 +35,27 @@ from finn.transformation.general import ApplyConfig
 import warnings
 import json
 
+def _get_nodes_by_partition_id(model, partition_id):
+    nodes_list = []
+    for n in model.graph.node:
+        p_id = get_by_name(n.attribute, "partition_id")
+        if p_id is None:
+            continue
+        elif p_id.i==partition_id:
+            nodes_list.append(n)
+    if nodes_list != []:
+        return nodes_list
+    else:
+        return None
+
+def _is_axi_node(node):
+    return (
+        node.op_type=="StreamingFCLayer_Batch"
+        and getCustomOp(node).get_nodeattr("mem_mode")=="decoupled"
+        and getCustomOp(node).get_nodeattr("ram_style")=="ultra"
+        and getCustomOp(node).get_nodeattr("runtime_writeable_weights")==1
+    )
+
 
 class Floorplan(Transformation):
     """Perform Floorplanning of the dataflow design:
@@ -159,17 +180,59 @@ class Floorplan(Transformation):
                 pre_nodes = [pre_node]
 
             node_slr = node_inst.get_nodeattr("slr")
-            for pre_node in pre_nodes:
+            for idx, pre_node in enumerate(pre_nodes):
                 pre_inst = getCustomOp(pre_node)
                 pre_slr = pre_inst.get_nodeattr("slr")
                 if node_slr == pre_slr:
                     partition_id = pre_inst.get_nodeattr("partition_id")
-                    node_inst.set_nodeattr("partition_id", partition_id)
+                    if len(pre_nodes)==2: # we have to prevent loops in residual blocks (AddStreams_Batch)
+                        second_producer_inst = getCustomOp(pre_nodes[1-idx])
+                        is_cyclic = partition_id < second_producer_inst.get_nodeattr("partition_id")
+                        same_slr = node_slr==second_producer_inst.get_nodeattr("slr")
+                        if is_cyclic and not same_slr:
+                            # no matching, new partition
+                            node_inst.set_nodeattr("partition_id", partition_cnt)
+                            partition_cnt += 1
+                        else:
+                            if is_cyclic and same_slr:
+                                # set it to largest partition_id
+                                partition_id_second_node = second_producer_inst.get_nodeattr("partition_id")
+                                node_inst.set_nodeattr("partition_id", partition_id_second_node)
+                            else:
+                                node_inst.set_nodeattr("partition_id", partition_id)
+                    else:
+                        if _is_axi_node(node):
+                            partition_id_nodes = _get_nodes_by_partition_id(model, partition_id)
+                            if partition_id_nodes is None:
+                                node_inst.set_nodeattr("partition_id", partition_id)
+                            else:
+                                has_axi_node = any([_is_axi_node(x) for x in partition_id_nodes])
+                                if has_axi_node:
+                                    # partition already contains 'axi_node', so create a new partition for the current node
+                                    node_inst.set_nodeattr("partition_id", partition_cnt)
+                                    partition_cnt += 1
+                                else:
+                                    node_inst.set_nodeattr("partition_id", partition_id)
+                        else:
+                            node_inst.set_nodeattr("partition_id", partition_id)
                     break
             else:
                 # no matching, new partition
                 node_inst.set_nodeattr("partition_id", partition_cnt)
                 partition_cnt += 1
+
+            #node_slr = node_inst.get_nodeattr("slr")
+            #for pre_node in pre_nodes:
+            #    pre_inst = getCustomOp(pre_node)
+            #    pre_slr = pre_inst.get_nodeattr("slr")
+            #    if node_slr == pre_slr:
+            #        partition_id = pre_inst.get_nodeattr("partition_id")
+            #        node_inst.set_nodeattr("partition_id", partition_id)
+            #        break
+            #else:
+            #    # no matching, new partition
+            #    node_inst.set_nodeattr("partition_id", partition_cnt)
+            #    partition_cnt += 1
 
         # save the updated floorplan
         floorplan = model.analysis(floorplan_params)
