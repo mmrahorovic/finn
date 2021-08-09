@@ -436,68 +436,34 @@ class ConvolutionInputGenerator1D(HLSCustomOp):
                 dilation_y == 1
             ), "Dilation value greater than 1 along y-axis is not yet supported"
             self.code_gen_dict["$DEFINES$"] = [
-                """
+            """
             #define ConvKernelDim1_x {}\n
-            #define ConvKernelDim1_y {}\n
             #define IFMChannels1 {}\n
             #define Input_precision1 {}\n
             #define IFMDim1_x {}\n
-            #define IFMDim1_y {}\n
             #define OFMDim1_x {}\n
-            #define OFMDim1_y {}\n
             #define SIMD1 {}\n
             #define Stride1_x {}\n
-            #define Stride1_y {}\n
             #define Dilation1_x {}\n
-            #define Dilation1_y {}\n
             #define numReps {}
-            """.format(
-                    k_x,
-                    k_y,
-                    ifm_ch,
-                    ifm_precision,
-                    ifm_dim_x,
-                    ifm_dim_y,
-                    ofm_dim_x,
-                    ofm_dim_y,
-                    simd,
-                    stride_x,
-                    stride_y,
-                    dilation_x,
-                    dilation_y,
-                    numReps,
-                )
+            """
+            .format(k_x, ifm_ch, ifm_precision,
+            ifm_dim_x, ofm_dim_x, simd, stride_x, dilation_x, numReps)
             ]
         else:
-            ofm_dim = self.get_nodeattr("OFMDim")
             self.code_gen_dict["$DEFINES$"] = [
-                """
+            """
             #define ConvKernelDim1_x {}\n
-            #define ConvKernelDim1_y {}\n
             #define IFMChannels1 {}\n
             #define Input_precision1 {}\n
             #define IFMDim1_x {}\n
-            #define IFMDim1_y {}\n
             #define OFMDim1_x {}\n
-            #define OFMDim1_y {}\n
             #define SIMD1 {}\n
             #define Stride1_x {}\n
-            #define Stride1_y {}\n
             #define numReps {}
-            """.format(
-                    k_x,
-                    k_y,
-                    ifm_ch,
-                    ifm_precision,
-                    ifm_dim_x,
-                    ifm_dim_y,
-                    ofm_dim_x,
-                    ofm_dim_y,
-                    simd,
-                    stride_x,
-                    stride_y,
-                    numReps,
-                )
+            """
+            .format(k_x, ifm_ch, ifm_precision,
+            ifm_dim_x, ofm_dim_x, simd, stride_x, numReps)
             ]
 
     def read_npy_data(self):
@@ -536,35 +502,34 @@ class ConvolutionInputGenerator1D(HLSCustomOp):
             "ultra": "ap_resource_uram()",
         }
         hls_ram_style = map_to_hls_ram_style[ram_style]
-        hls_call = "ConvolutionInputGenerator"
+        hls_call = "ConvolutionInputGenerator_1D"
         # check which ConvolutionInputGenerator is needed
         dilation_h, dilation_w = self.get_nodeattr("Dilation")
 
-        hls_call += "_NonSquare"
         if dilation_h > 1 or dilation_w > 1:
-            hls_call += "_Dilated"
+            hls_call += "_dilated"
             if self.get_nodeattr("depthwise") == 1:
                 hls_call += "_dws"
             self.code_gen_dict["$DOCOMPUTE$"] = [
-                """{}<ConvKernelDim1_x, ConvKernelDim1_y, IFMChannels1, Input_precision1,
-                IFMDim1_x, IFMDim1_y, OFMDim1_x, OFMDim1_y, SIMD1, Stride1_x, Stride1_y,
-                Dilation1_x, Dilation1_y> (in0, out, numReps, {});""".format(
+                """{}<ConvKernelDim1_x, IFMChannels1, Input_precision1,
+                IFMDim1_x, OFMDim1_x, SIMD1, Stride1_x,
+                Dilation1_x> (in0, out, numReps, {});""".format(
                     hls_call, hls_ram_style
                 )
             ]
         elif self.get_nodeattr("depthwise") == 1:
             hls_call += "_dws"
             self.code_gen_dict["$DOCOMPUTE$"] = [
-                """{}<ConvKernelDim1_x, ConvKernelDim1_y, IFMChannels1, Input_precision1,
-                IFMDim1_x, IFMDim1_y, OFMDim1_x, OFMDim1_y, SIMD1, Stride1_x, Stride1_y>
+                """{}<ConvKernelDim1_x, IFMChannels1, Input_precision1,
+                IFMDim1_x, OFMDim1_x, SIMD1, Stride1_x>
                 (in0, out, numReps, {});""".format(
                     hls_call, hls_ram_style
                 )
             ]
         else:
             self.code_gen_dict["$DOCOMPUTE$"] = [
-                """{}<ConvKernelDim1_x, ConvKernelDim1_y, IFMChannels1, Input_precision1,
-                IFMDim1_x, IFMDim1_y, OFMDim1_x, OFMDim1_y, SIMD1, Stride1_x, Stride1_y>
+                """{}<ConvKernelDim1_x, IFMChannels1, Input_precision1,
+                IFMDim1_x, OFMDim1_x, SIMD1, Stride1_x>
                 (in0, out, numReps, {});""".format(
                     hls_call, hls_ram_style
                 )
