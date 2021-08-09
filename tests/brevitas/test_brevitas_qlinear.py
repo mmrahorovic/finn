@@ -27,15 +27,17 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import pytest
-import os
-import numpy as np
-import torch
+
 import brevitas.onnx as bo
-from brevitas.nn import QuantLinear
+import numpy as np
+import os
+import torch
 from brevitas.core.quant import QuantType
-from finn.core.modelwrapper import ModelWrapper
-from finn.core.datatype import DataType
+from brevitas.nn import QuantLinear
+
 import finn.core.onnx_exec as oxe
+from finn.core.datatype import DataType
+from finn.core.modelwrapper import ModelWrapper
 from finn.transformation.infer_shapes import InferShapes
 from finn.util.basic import gen_finn_dt_tensor
 
@@ -48,8 +50,6 @@ export_onnx_path = "test_brevitas_qlinear.onnx"
 @pytest.mark.parametrize("w_bits", [4])
 @pytest.mark.parametrize("i_dtype", [DataType.UINT4])
 def test_brevitas_qlinear(bias, out_features, in_features, w_bits, i_dtype):
-    if bias:
-        pytest.xfail("bias export bug")
     i_shape = (1, in_features)
     w_shape = (out_features, in_features)
     b_linear = QuantLinear(

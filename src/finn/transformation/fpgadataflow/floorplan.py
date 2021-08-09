@@ -26,14 +26,14 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import json
+import warnings
+
+from finn.analysis.fpgadataflow.floorplan_params import floorplan_params
 from finn.custom_op.registry import getCustomOp
 from finn.transformation.base import Transformation
-from finn.util.basic import get_by_name
-from finn.analysis.fpgadataflow.floorplan_params import floorplan_params
-from finn.util.basic import make_build_dir
 from finn.transformation.general import ApplyConfig
-import warnings
-import json
+from finn.util.basic import get_by_name, make_build_dir
 
 def _get_nodes_by_partition_id(model, partition_id):
     nodes_list = []
@@ -91,7 +91,7 @@ class Floorplan(Transformation):
 
         try:
             default_slr = self.user_floorplan["Defaults"]["slr"][0]
-        except:
+        except Exception:
             default_slr = -1
 
         # perform DWC and FIFO specific adjustments
@@ -128,7 +128,8 @@ class Floorplan(Transformation):
             warnings.warn(
                 str(unassigned_nodes)
                 + " nodes have no entry in the provided floorplan,"
-                + " SLR was set to " + str(default_slr)
+                + " SLR was set to "
+                + str(default_slr)
             )
 
         # partition id generation

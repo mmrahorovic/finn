@@ -27,19 +27,20 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import pytest
-import os
-import numpy as np
-import torch
+
 import brevitas.onnx as bo
-from brevitas.nn import QuantConv2d
-from brevitas.core.restrict_val import RestrictValueType
+import numpy as np
+import os
+import torch
 from brevitas.core.quant import QuantType
+from brevitas.core.restrict_val import RestrictValueType
 from brevitas.core.scaling import ScalingImplType
 from brevitas.core.stats import StatsOp
+from brevitas.nn import QuantConv2d
 
-from finn.core.modelwrapper import ModelWrapper
-from finn.core.datatype import DataType
 import finn.core.onnx_exec as oxe
+from finn.core.datatype import DataType
+from finn.core.modelwrapper import ModelWrapper
 from finn.transformation.infer_shapes import InferShapes
 from finn.util.basic import gen_finn_dt_tensor
 
@@ -50,8 +51,6 @@ export_onnx_path = "test_brevitas_conv.onnx"
 @pytest.mark.parametrize("bias", [True, False])
 @pytest.mark.parametrize("in_channels", [32])
 def test_brevitas_QConv2d(dw, bias, in_channels):
-    if bias:
-        pytest.xfail("bias export bug")
     ishape = (1, 32, 111, 111)
     if dw is True:
         groups = in_channels

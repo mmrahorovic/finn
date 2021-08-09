@@ -8,10 +8,10 @@ inflect==4.1.0
 librosa==0.8.0
 numpy==1.18.0
 onnx==1.7.0
-onnxoptimizer==0.2.6
+onnxoptimizer
 onnxruntime==1.4.0
 pre-commit==2.6.0
-ruamel.yaml==0.16.12
+pyscaffold==3.2.1
 scipy==1.5.2
 setupext-janitor>=1.1.2
 toposort==1.5
