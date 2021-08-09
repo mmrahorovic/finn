@@ -19,7 +19,10 @@ export FINN_ROOT=/workspace/finn
 export VIVADO_IP_CACHE=$FINN_HOST_BUILD_DIR/vivado_ip_cache
 export ALVEO_BOARD="U250"
 
-export NUM_DEFAULT_WORKERS=10
+export NUM_DEFAULT_WORKERS=2
+
+export OHMYXILINX="/workspace/oh-my-xilinx"
+#export OHMYXILINX="/workspace/finn/oh-my-xilinx"
 
 pip install --user -e /workspace/brevitas
 pip install --user -e /workspace/finn-base
