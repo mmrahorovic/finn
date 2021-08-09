@@ -592,16 +592,11 @@ def test_end2end_quartznet_set_fifo_depths(manually=True):
 
             if manually:
                 model_partition = model_partition.transform(InsertDWC())
-                #model_partition = model_partition.transform(InsertFIFO(create_shallow_fifos=True))
+                model_partition = model_partition.transform(InsertFIFO(create_shallow_fifos=True))
                 model_partition = model_partition.transform(GiveUniqueNodeNames())
                 model_partition = model_partition.transform(GiveReadableTensorNames())
-                #for n_par in model_partition.graph.node:
-                #    if n_par.op_type=="StreamingFIFO":
-                #        inst_par = getCustomOp(n_par)
-                #        inst_par.set_nodeattr("depth", 256)
-                #        inst_par.set_nodeattr("impl_style", "vivado")
-                #        inst_par.set_nodeattr("ram_style", "auto")
-                #model_partition = model_partition.transform(RemoveShallowFIFOs())
+                model_partition = model_partition.transform(ApplyConfig(build_dir+"/folding_config_fifos.json"))
+                model_partition = model_partition.transform(RemoveShallowFIFOs())
                 model_partition.save(new_file)
             else:
                 # TODO: add Vivado ram style after inspecting resource utilization --> probably LUTs (from back-on-the-envelope resource estimation calculations)
