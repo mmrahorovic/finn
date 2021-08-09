@@ -55,7 +55,6 @@ from finn.transformation.infer_data_layouts import InferDataLayouts
 from . import templates
 from enum import Enum
 
-
 def _check_vitis_envvars():
     assert "VITIS_PATH" in os.environ, "VITIS_PATH must be set for Vitis"
     assert (
@@ -319,6 +318,11 @@ class VitisLink(Transformation):
                 )
             )
             f.write("cd {}\n".format(working_dir))
+
+        ### TODO remove this part
+        return (model, False)
+        ###
+
         bash_command = ["bash", script]
         process_compile = subprocess.Popen(bash_command, stdout=subprocess.PIPE)
         process_compile.communicate()
@@ -373,6 +377,7 @@ class VitisBuild(Transformation):
         enable_debug=False,
         floorplan_file=None,
         enable_link=True,
+        parent_model_path="/tmp/finn_dev_mirza/parent_model.onnx"
     ):
         super().__init__()
         self.fpga_part = fpga_part
@@ -382,6 +387,7 @@ class VitisBuild(Transformation):
         self.enable_debug = enable_debug
         self.floorplan_file = floorplan_file
         self.enable_link = enable_link
+        self.parent_model_path = parent_model_path
 
     def apply(self, model):
         _check_vitis_envvars()
@@ -394,19 +400,32 @@ class VitisBuild(Transformation):
             model = model.transform(GiveUniqueNodeNames())
             model = model.transform(GiveReadableTensorNames())
 
+        print("Running Floorplan...")
         model = model.transform(Floorplan(floorplan=self.floorplan_file))
 
+        #for idx, n in enumerate(model.graph.node):
+        #    getCustomOp(n).set_nodeattr("partition_id", idx)
+        #model.save(self.parent_model_path)
+
+        print("Running CreateDataflowPartition...")
         model = model.transform(CreateDataflowPartition())
         model = model.transform(GiveUniqueNodeNames())
         model = model.transform(GiveReadableTensorNames())
+        # Save model
+        model.save(self.parent_model_path)
 
         # Build each kernel individually
+        print("Building each kernel individually...")
         sdp_nodes = model.get_nodes_by_op_type("StreamingDataflowPartition")
-        for sdp_node in sdp_nodes:
+        for idx, sdp_node in enumerate(sdp_nodes):
+            #if idx<93:
+            #    continue
+            print("At: {} ({}/{})...".format(sdp_node.name, idx, len(sdp_nodes)))
             sdp_node = getCustomOp(sdp_node)
             dataflow_model_filename = sdp_node.get_nodeattr("model")
             kernel_model = ModelWrapper(dataflow_model_filename)
-            kernel_model = kernel_model.transform(InsertFIFO())
+            ## TODO: insert FIFOs
+            #kernel_model = kernel_model.transform(InsertFIFO())
             kernel_model = kernel_model.transform(RemoveUnusedTensors())
             kernel_model = kernel_model.transform(GiveUniqueNodeNames())
             kernel_model.save(dataflow_model_filename)
@@ -419,12 +438,14 @@ class VitisBuild(Transformation):
                     self.fpga_part, self.period_ns, sdp_node.onnx_node.name, True
                 )
             )
+            print("Running CreateVitisXO...")
             kernel_model = kernel_model.transform(
                 CreateVitisXO(sdp_node.onnx_node.name)
             )
             kernel_model.set_metadata_prop("platform", "alveo")
             kernel_model.save(dataflow_model_filename)
         # Assemble design from kernels
+        print("Running VitisLink...")
         if self.enable_link:
             model = model.transform(
                 VitisLink(
