@@ -109,6 +109,14 @@ class StreamingFIFO(HLSCustomOp):
     def verify_node(self):
         pass
 
+    def get_input_datatype(self):
+        """Returns FINN DataType of input."""
+        return DataType[self.get_nodeattr("dataType")]
+
+    def get_output_datatype(self):
+        """Returns FINN DataType of output."""
+        return DataType[self.get_nodeattr("dataType")]
+
     def get_verilog_top_module_name(self):
         "Return the Verilog top module name for this node."
 
