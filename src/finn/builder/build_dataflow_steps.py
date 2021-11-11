@@ -332,8 +332,10 @@ def step_target_fps_parallelization(model: ModelWrapper, cfg: DataflowBuildConfi
 
     folding_mode = cfg.folding_mode
     if folding_mode=="resources":
-        print("Folding the network based on the resource budget of {}x of the available LUTs!".format(target_scale_ratio))
-        target_cycles_per_frame = cfg._resolve_cycles_per_frame()
+        print("Folding the network based on the resource budget of {}x of the available LUTs!".format(target_scale_ratio)))
+        # If target_fps is specified, the network is folded either until the resource budget is hit or target_fps
+        # is reached. Otherwise, network is folded based on resource budget.
+        target_cycles_per_frame = cfg._resolve_cycles_per_frame() if cfg._resolve_cycles_per_frame() is not None else 0
         model = model.transform(
             SetFoldingExhaustive(
                 target_cycles_per_frame, cfg.board, scale_ratio=cfg.resource_frac

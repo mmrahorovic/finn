@@ -186,6 +186,9 @@ class DataflowBuildConfig:
     #: either target_fps requirement or the resource limit on the board scaled
     #: by resource_frac. If invalid folding_mode specified, then folding is
     #: is done according to target_fps.
+    #: If target_fps is specified, the network is folded either until the resource
+    #: budget is reached or until the target_fps is met. If target_fps is not
+    #: specified, the network is folded until the resource budget is reached.
     #: Expected: ["frames", "resources"]
     folding_mode: Optional[str] = "frames"
   
