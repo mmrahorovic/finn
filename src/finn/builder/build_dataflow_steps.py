@@ -330,27 +330,39 @@ def step_target_fps_parallelization(model: ModelWrapper, cfg: DataflowBuildConfi
     auto_folding_config.json under the outputs, which can serve as a basis for
     customizing the folding factors further."""
 
-    target_cycles_per_frame = cfg._resolve_cycles_per_frame()
-    if target_cycles_per_frame is not None:
+    folding_mode = cfg.folding_mode
+    if folding_mode=="resources":
+        print("Folding the network based on the resource budget of {}x of the available LUTs!".format(target_scale_ratio)))
+        target_cycles_per_frame = cfg._resolve_cycles_per_frame()
         model = model.transform(
-            SetFolding(
-                target_cycles_per_frame,
-                mvau_wwidth_max=cfg.mvau_wwidth_max,
-                two_pass_relaxation=cfg.folding_two_pass_relaxation,
+            SetFoldingExhaustive(
+                target_cycles_per_frame, cfg.board, scale_ratio=cfg.resource_frac
             )
         )
-        # extract the suggested configuration and save it as json
-        hw_attrs = [
-            "PE",
-            "SIMD",
-            "ram_style",
-            "resType",
-            "mem_mode",
-            "runtime_writeable_weights",
-        ]
-        extract_model_config_to_json(
-            model, cfg.output_dir + "/auto_folding_config.json", hw_attrs
-        )
+    if folding_mode=="frames" or folding_mode not in ["frames", "resources"]:
+        print("Folding the network based on target frames per second!")
+        target_cycles_per_frame = cfg._resolve_cycles_per_frame()
+        if target_cycles_per_frame is not None:
+            model = model.transform(
+                SetFolding(
+                    target_cycles_per_frame,
+                    mvau_wwidth_max=cfg.mvau_wwidth_max,
+                    two_pass_relaxation=cfg.folding_two_pass_relaxation,
+                )
+            )
+        
+    # extract the suggested configuration and save it as json
+    hw_attrs = [
+        "PE",
+        "SIMD",
+        "ram_style",
+        "resType",
+        "mem_mode",
+        "runtime_writeable_weights",
+    ]
+    extract_model_config_to_json(
+        model, cfg.output_dir + "/auto_folding_config.json", hw_attrs
+    )
 
     return model
 

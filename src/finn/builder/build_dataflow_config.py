@@ -176,6 +176,19 @@ class DataflowBuildConfig:
     #: that will override the target_fps setting here.
     target_fps: Optional[int] = None
 
+    #: (Optional) Fraction that indicates what part of the LUTs of the targeted
+    #: FPGA board are set available for user's network.
+    #: If parallelization attributes are specified as part of folding_config_file
+    #: that will override the resource_frac setting here.
+    resource_frac: Optional[float] = 0.7
+
+    #: (Optional) Indicate whether the network should be explored based on
+    #: either target_fps requirement or the resource limit on the board scaled
+    #: by resource_frac. If invalid folding_mode specified, then folding is
+    #: is done according to target_fps.
+    #: Expected: ["frames", "resources"]
+    folding_mode: Optional[str] = "frames"
+  
     #: (Optional) Use two-pass relaxation for folding, only relevant if target_fps
     #: is set. If enabled, parallelization will internally run a second time if the
     #: target cycles from the first pass could not be achieved, instead using the
