@@ -553,7 +553,7 @@ class SetFoldingExhaustive(Transformation):
                 reverse=True,
             )[0]
 
-            if slowest_layer[1].get("cycles") < self.target_cycles_per_frame:
+            if self.target_cycles_per_frame is not None and slowest_layer[1].get("cycles") < self.target_cycles_per_frame:
                 print(f"Reached target of {self.target_cycles_per_frame} cycles")
                 break
 
@@ -607,6 +607,9 @@ class SetFoldingExhaustive(Transformation):
             model, among_slowest, all_attrs
         )
 
-        reclaimed_model = self.reclaim_resources(new_model, attrs)
+        if target_cycles_per_frame is None:
+            reclaimed_model = new_model
+        else:
+            reclaimed_model = self.reclaim_resources(new_model, attrs)
 
         return (reclaimed_model, False)
