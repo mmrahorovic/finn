@@ -332,7 +332,7 @@ def step_target_fps_parallelization(model: ModelWrapper, cfg: DataflowBuildConfi
 
     folding_mode = cfg.folding_mode
     if folding_mode=="resources":
-        print("Folding the network based on the resource budget of {}x of the available LUTs!".format(target_scale_ratio)))
+        print("Folding the network based on the resource budget of {}x of the available LUTs!".format(target_scale_ratio))
         target_cycles_per_frame = cfg._resolve_cycles_per_frame()
         model = model.transform(
             SetFoldingExhaustive(
@@ -350,7 +350,7 @@ def step_target_fps_parallelization(model: ModelWrapper, cfg: DataflowBuildConfi
                     two_pass_relaxation=cfg.folding_two_pass_relaxation,
                 )
             )
-        
+
     # extract the suggested configuration and save it as json
     hw_attrs = [
         "PE",
