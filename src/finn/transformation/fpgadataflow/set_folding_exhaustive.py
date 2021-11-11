@@ -2,6 +2,7 @@ from finn.custom_op.registry import getCustomOp
 from finn.transformation.base import Transformation
 from finn.util.fpgadataflow import is_fpgadataflow_node
 from finn.transformation.general import GiveUniqueNodeNames
+from finn.util.platforms import platforms
 from math import floor
 
 from copy import deepcopy
@@ -43,7 +44,6 @@ class SetFoldingExhaustive(Transformation):
     def __init__(
         self,
         target_cycles_per_frame=None,
-        max_luts=None,
         board=None,
         mvau_wwidth_max=36,
         scale_ratio=0.7,
@@ -56,7 +56,16 @@ class SetFoldingExhaustive(Transformation):
         self.board = board if board is not None else None
         self.mvau_wwidth_max = mvau_wwidth_max
         self.from_scratch = from_scratch
-        self.max_luts = scale_ratio * max_luts if max_luts is not None else float("inf")
+        
+        try:
+            board_resources = platforms[board]().compute_resources
+            max_luts = sum(res[0] for res in board_resources)
+        except KeyError as e:
+            print("Board {} not found in finn.util.platforms!".format(board))
+            raise
+
+        assert (scale_ratio > 0 and scale_ratio <= 1), "Scale ratio exceeds range (0,1]!"
+        self.max_luts = scale_ratio * max_luts
 
         self.pe_ops = [
             "AddStreams_Batch",
