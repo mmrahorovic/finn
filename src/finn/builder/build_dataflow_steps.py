@@ -83,6 +83,7 @@ from finn.transformation.fpgadataflow.set_fifo_depths import (
 from finn.transformation.fpgadataflow.set_folding import SetFolding
 from finn.transformation.fpgadataflow.synth_ooc import SynthOutOfContext
 from finn.transformation.fpgadataflow.vitis_build import VitisBuild
+from finn.transformation.fpgadataflow.set_folding_exhaustive import SetFoldingExhaustive
 from finn.transformation.general import (
     ApplyConfig,
     GiveReadableTensorNames,
@@ -105,6 +106,7 @@ from finn.util.basic import get_rtlsim_trace_depth
 from finn.util.config import extract_model_config_to_json
 from finn.util.pyverilator import pyverilate_get_liveness_threshold_cycles
 from finn.util.test import execute_parent
+from finn.util.platforms import platforms
 
 
 def verify_step(
@@ -332,17 +334,25 @@ def step_target_fps_parallelization(model: ModelWrapper, cfg: DataflowBuildConfi
 
     folding_mode = cfg.folding_mode
     if folding_mode=="resources":
-        print("Folding the network based on the resource budget of {}x of the available LUTs!".format(target_scale_ratio)))
-        # If target_fps is specified, the network is folded either until the resource budget is hit or target_fps
-        # is reached. Otherwise, network is folded based on resource budget.
-        #target_cycles_per_frame = cfg._resolve_cycles_per_frame() if cfg._resolve_cycles_per_frame() is not None else 0
+        print("Folding the network based on the resource budget of {}x of the available LUTs!".format(cfg.resource_frac)))
+        if cfg.max_luts is not None:
+            max_luts = cfg.max_luts
+        elif cfg.board is not None:
+            try:
+                board_resources = platforms[board]().compute_resources
+                max_luts = sum(res[0] for res in board_resources)
+            except KeyError as e:
+                print("Board {} not found in finn.util.platforms!".format(board))
+                raise
+        else:
+            raise Exception("Please specify either the maximum number of LUTs available or board")
         target_cycles_per_frame = cfg._resolve_cycles_per_frame()
         model = model.transform(
             SetFoldingExhaustive(
-                target_cycles_per_frame, cfg.board, scale_ratio=cfg.resource_frac
+                target_cycles_per_frame, cfg.mvau_wwidth_max, scale_ratio=cfg.resource_frac, max_luts=max_luts
             )
         )
-    if folding_mode=="frames" or folding_mode not in ["frames", "resources"]:
+    elif folding_mode=="frames":
         print("Folding the network based on target frames per second!")
         target_cycles_per_frame = cfg._resolve_cycles_per_frame()
         if target_cycles_per_frame is not None:
@@ -353,6 +363,8 @@ def step_target_fps_parallelization(model: ModelWrapper, cfg: DataflowBuildConfi
                     two_pass_relaxation=cfg.folding_two_pass_relaxation,
                 )
             )
+    else:
+        raise("Folding mode {} not recognized! Please choose either 'frames' or 'resources'.".format(folding_mode))
 
     # extract the suggested configuration and save it as json
     hw_attrs = [

@@ -182,6 +182,13 @@ class DataflowBuildConfig:
     #: that will override the resource_frac setting here.
     resource_frac: Optional[float] = 0.7
 
+    #: (Optional) Maximum number of LUTs available to be used.
+    #: If max_luts is specified with folding_mode="resources", the network is
+    #: folded while ensuring to stay under the budget of the specified
+    #: maximum number of LUTs. If not specified, the resource_frac and board
+    #: attributes will be used to determine the LUT budget.
+    max_luts: Optional[int] = None
+
     #: (Optional) Indicate whether the network should be explored based on
     #: either target_fps requirement or the resource limit on the board scaled
     #: by resource_frac. If invalid folding_mode specified, then folding is
