@@ -71,9 +71,9 @@ SCRIPTPATH=$(dirname "$SCRIPT")
 
 # the settings below will be taken from environment variables if available,
 # otherwise the defaults below will be used
-: ${JUPYTER_PORT=8888}
+: ${JUPYTER_PORT=5910}
 : ${JUPYTER_PASSWD_HASH=""}
-: ${NETRON_PORT=8081}
+: ${NETRON_PORT=5911}
 : ${LOCALHOST_URL="localhost"}
 : ${PYNQ_USERNAME="xilinx"}
 : ${PYNQ_PASSWORD="xilinx"}
@@ -132,6 +132,8 @@ elif [ "$1" = "build_custom" ]; then
   DOCKER_CMD="python -mpdb -cc -cq build.py"
 else
   gecho "Running container only"
+  FINN_DOCKER_EXTRA+="-e JUPYTER_PORT=$JUPYTER_PORT "
+  FINN_DOCKER_EXTRA+="-e NETRON_PORT=$NETRON_PORT "
   DOCKER_CMD="bash"
   DOCKER_INTERACTIVE="-it"
 fi
@@ -176,6 +178,9 @@ DOCKER_EXEC="docker run -t --rm $DOCKER_INTERACTIVE --tty --init "
 DOCKER_EXEC+="--hostname $DOCKER_INST_NAME "
 DOCKER_EXEC+="-e SHELL=/bin/bash "
 DOCKER_EXEC+="-v $SCRIPTPATH:/workspace/finn "
+DOCKER_EXEC+="-v /home/mirzam/git_repos/forks/finn-base:/workspace/finn-base "
+DOCKER_EXEC+="-v /home/mirzam/git_repos/forks/finn-experimental:/workspace/finn-experimental "
+#DOCKER_EXEC+="-v /home/mirzam/git_repos/forks/finn-examples:/workspace/finn-examples "
 DOCKER_EXEC+="-v $FINN_HOST_BUILD_DIR:$FINN_HOST_BUILD_DIR "
 DOCKER_EXEC+="-e FINN_BUILD_DIR=$FINN_HOST_BUILD_DIR "
 DOCKER_EXEC+="-e FINN_ROOT="/workspace/finn" "

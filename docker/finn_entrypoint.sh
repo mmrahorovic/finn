@@ -51,6 +51,9 @@ recho () {
   echo -e "${RED}ERROR: $1${NC}"
 }
 
+pip install -e /workspace/finn-base
+pip install -e /workspace/finn-experimental
+
 if [ -f "$FINN_ROOT/setup.py" ];then
   # run pip install for finn
   pip install --user -e $FINN_ROOT
