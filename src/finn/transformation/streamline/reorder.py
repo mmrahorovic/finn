@@ -30,7 +30,6 @@ import numpy as np
 import qonnx.core.data_layout as DataLayout
 import warnings
 from onnx import TensorProto
-<<<<<<< HEAD
 from onnx import helper as oh
 from qonnx.core.datatype import DataType
 from qonnx.core.onnx_exec import execute_node
@@ -41,19 +40,6 @@ from qonnx.transformation.infer_data_layouts import InferDataLayouts
 from qonnx.transformation.infer_datatypes import InferDataTypes
 from qonnx.transformation.infer_shapes import InferShapes
 from qonnx.util.basic import get_by_name
-=======
-
-from finn.transformation.base import Transformation
-import finn.core.data_layout as DataLayout
-from finn.transformation.general import SortGraph
-from finn.transformation.infer_shapes import InferShapes
-from finn.transformation.infer_datatypes import InferDataTypes
-from finn.transformation.infer_data_layouts import InferDataLayouts
-from finn.core.datatype import DataType
-from finn.core.onnx_exec import execute_node
-from finn.util.basic import get_by_name
-from finn.custom_op.registry import getCustomOp
->>>>>>> pr292
 
 
 class MoveAddPastMul(Transformation):

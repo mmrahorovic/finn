@@ -92,11 +92,11 @@ class ConvolutionInputGenerator(HLSCustomOp):
         # TODO non-square can be enabled in theory but needs testing
         ret = super().get_nodeattr(name)
         props_to_check = ["ConvKernelDim", "IFMDim", "OFMDim", "Stride", "Dilation"]
-        if name in props_to_check:
-            is_square = ret[0] == ret[1]
-            assert is_square, "Only square %s supported" % name
-        if name == "Dilation":
-            assert ret[0] == ret[1] == 1, "Only dilation=1 supported"
+        #if name in props_to_check:
+        #    is_square = ret[0] == ret[1]
+        #    assert is_square, "Only square %s supported" % name
+        #if name == "Dilation":
+        #    assert ret[0] == ret[1] == 1, "Only dilation=1 supported"
         return ret
 
     def get_normal_input_shape(self):
@@ -212,12 +212,13 @@ class ConvolutionInputGenerator(HLSCustomOp):
         # NOTE: only tested with a square convolution
         simd = self.get_nodeattr("SIMD")
         ifm_ch = self.get_nodeattr("IFMChannels")
-        ifm_dim = self.get_nodeattr("IFMDim")[0]
-        k = self.get_nodeattr("ConvKernelDim")[0]
-        stride = self.get_nodeattr("Stride")[0]
+        ifm_dim_h, ifm_dim_w = self.get_nodeattr("IFMDim")
+        k_h, k_w = self.get_nodeattr("ConvKernelDim")
+        stride_h, stride_w = self.get_nodeattr("Stride")
+        dilation_h, dilation_w = self.get_nodeattr("Dilation")
         ram_style = self.get_nodeattr("ram_style")
         if ram_style == "block" or ram_style == "auto":
-            ram_depth = ifm_dim * ifm_ch / simd
+            ram_depth = ifm_dim_w * ifm_ch / simd
             if ram_depth <= 512:
                 ram_width = 36
             elif ram_depth <= 1024:
@@ -231,10 +232,10 @@ class ConvolutionInputGenerator(HLSCustomOp):
             else:
                 ram_width = 1
             return int(
-                (k + stride)
+                (k_h + dilation_h + stride_h)
                 * (
                     math.ceil(simd * self.get_input_datatype().bitwidth() / ram_width)
-                    * math.ceil(ifm_dim * ifm_ch / simd / ram_depth)
+                    * math.ceil(ifm_dim_w * ifm_ch / simd / ram_depth)
                 )
             )
         else:
@@ -244,17 +245,18 @@ class ConvolutionInputGenerator(HLSCustomOp):
         # NOTE: only tested with a square convolution
         simd = self.get_nodeattr("SIMD")
         ifm_ch = self.get_nodeattr("IFMChannels")
-        ifm_dim = self.get_nodeattr("IFMDim")[0]
-        k = self.get_nodeattr("ConvKernelDim")[0]
-        stride = self.get_nodeattr("Stride")[0]
+        ifm_dim_h, ifm_dim_w = self.get_nodeattr("IFMDim")
+        k_h, k_w = self.get_nodeattr("ConvKernelDim")
+        stride_h, stride_w = self.get_nodeattr("Stride")
+        dilation_h, dilation_w = self.get_nodeattr("Dilation")
         ram_style = self.get_nodeattr("ram_style")
         if ram_style == "distributed":
             ram_luts = int(
-                (k + stride)
+                (k_h + dilation_h + stride_h)
                 * (
                     simd
                     * self.get_input_datatype().bitwidth()
-                    * math.ceil(ifm_dim * ifm_ch / simd / 64)
+                    * math.ceil(ifm_dim_w * ifm_ch / simd / 64)
                 )
             )
         else:
@@ -265,16 +267,18 @@ class ConvolutionInputGenerator(HLSCustomOp):
         # NOTE: only tested with a square convolution
         simd = self.get_nodeattr("SIMD")
         ifm_ch = self.get_nodeattr("IFMChannels")
-        ifm_dim = self.get_nodeattr("IFMDim")[0]
-        k = self.get_nodeattr("ConvKernelDim")[0]
-        stride = self.get_nodeattr("Stride")[0]
+        ifm_ch = self.get_nodeattr("IFMChannels")
+        ifm_dim_h, ifm_dim_w = self.get_nodeattr("IFMDim")
+        k_h, k_w = self.get_nodeattr("ConvKernelDim")
+        stride_h, stride_w = self.get_nodeattr("Stride")
+        dilation_h, dilation_w = self.get_nodeattr("Dilation")
         ram_style = self.get_nodeattr("ram_style")
         if ram_style == "ultra":
             return int(
-                (k + stride)
+                (k_h + dilation_h + stride_h)
                 * (
                     math.ceil(simd * self.get_input_datatype().bitwidth() / 64)
-                    * math.ceil(ifm_dim * ifm_ch / simd / 4096)
+                    * math.ceil(ifm_dim_w * ifm_ch / simd / 4096)
                 )
             )
         else:

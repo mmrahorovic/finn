@@ -167,18 +167,18 @@ class InferConvInpGen(Transformation):
                 else:
                     # create equivalent ConvolutionInputGenerator node
                     if (
-                        is_square_image and is_square_kernel
+                        True
                     ):  # square images and square kernels
                         assert is_equal_stride, (
                             """%s: Non-equal strides along different axes is not supported
                             for (non-)square convolutions"""
                             % n.name
                         )
-                        assert dilation_h == 1 and dilation_w == 1, (
-                            """%s: Dilation value != 1 is not supported
-                            for square convolutions"""
-                            % n.name
-                        )
+                        #assert dilation_h == 1 and dilation_w == 1, (
+                        #    """%s: Dilation value != 1 is not supported
+                        #    for square convolutions"""
+                        #    % n.name
+                        #)
                         ConvInpGen_node = helper.make_node(
                             "ConvolutionInputGenerator",
                             [ConvInpGen_input],
