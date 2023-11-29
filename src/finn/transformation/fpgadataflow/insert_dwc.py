@@ -115,6 +115,7 @@ class InsertDWC(Transformation):
                                 dwc_shape,
                             )
                             graph.value_info.append(dwc_output_tensor)
+<<<<<<< Updated upstream
 
                             dwc_node = oh.make_node(
                                 node_optype,
@@ -136,6 +137,42 @@ class InsertDWC(Transformation):
                                 impl_attr = oh.make_attribute("impl_style", "hls")
                                 dwc_node.attribute.append(impl_attr)
 
+=======
+                            
+                            if n.op_type=="ConvolutionInputGenerator_rtl" and _is_parallel_window_mode(n0, consumer):
+                                simd = n1.get_nodeattr("SIMD")
+                                pe = n1.get_nodeattr("PE")
+                                channels = n1.get_nodeattr("Channels")
+                                kernel = n1.get_nodeattr("Kernel")
+                                dwc_node = oh.make_node(
+                                    "StreamingDataWidthConverter_rtl",
+                                    [output_name],
+                                    [dwc_output_tensor.name],
+                                    domain="finn.custom_op.fpgadataflow",
+                                    backend="fpgadataflow",
+                                    shape=dwc_shape,
+                                    inWidth=dwc_in_width,
+                                    outWidth=dwc_out_width,
+                                    dataType=str(dtype.name),
+                                    SIMD=simd,
+                                    PE=pe,
+                                    Channels=channels,
+                                    Kernel=kernel,
+                                )
+                            else:    
+                                dwc_node = oh.make_node(
+                                    "StreamingDataWidthConverter_Batch",
+                                    [output_name],
+                                    [dwc_output_tensor.name],
+                                    domain="finn.custom_op.fpgadataflow",
+                                    backend="fpgadataflow",
+                                    shape=dwc_shape,
+                                    inWidth=dwc_in_width,
+                                    outWidth=dwc_out_width,
+                                    dataType=str(dtype.name),
+                                    impl_style=impl_style,
+                                )
+>>>>>>> Stashed changes
                             # insert dwc
                             graph.node.insert(node_ind + 1, dwc_node)
 
