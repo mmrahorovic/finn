@@ -89,4 +89,4 @@ mvu_vvu_axi #(
 	.m_axis_output_tready(out_V_TREADY)
 );
 
-endmodule : $MODULE_NAME_AXI_WRAPPER$
+endmodule // $MODULE_NAME_AXI_WRAPPER$
